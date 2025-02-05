@@ -1,0 +1,49 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: memory-test-app
+  namespace: default
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: memory-test
+  template:
+    metadata:
+      labels:
+        app: memory-test
+    spec:
+      containers:
+      - name: stress
+        image: polinux/stress
+        resources:
+          requests:
+            cpu: 100m
+            memory: 100Mi
+          limits:
+            cpu: 200m
+            memory: 200Mi
+        command: ["stress"]
+        args: ["--vm", "1", "--vm-bytes", "150M"]
+---
+apiVersion: remediation.kubemedic.io/v1alpha1
+kind: SelfRemediationPolicy
+metadata:
+  name: memory-test-policy
+  namespace: default
+spec:
+  rules:
+    - name: memory-scaling
+      conditions:
+        - type: MemoryUsage
+          threshold: "80%"
+          duration: "1m"
+      actions:
+        - type: ScaleUp
+          target:
+            kind: Deployment
+            name: memory-test-app
+          scalingParams:
+            temporaryMaxReplicas: 3
+            scalingDuration: "5m"
+            revertStrategy: "Gradual" 

@@ -1,0 +1,88 @@
+apiVersion: remediation.kubemedic.io/v1alpha1
+kind: SelfRemediationPolicy
+metadata:
+  name: policy-template
+  namespace: default
+  labels:
+    kubemedic.io/policy-type: template
+    kubemedic.io/criticality: high
+  annotations:
+    kubemedic.io/description: "Template policy with best practices and documentation"
+    kubemedic.io/owner: "platform-team"
+    kubemedic.io/review-period: "90d"
+spec:
+  # Global policy settings
+  cooldownPeriod: "5m"
+  
+  # Optional Grafana integration
+  grafanaIntegration:
+    enabled: true
+    webhookUrl: "https://grafana.example.com/webhook"
+  
+  # Remediation rules
+  rules:
+    # CPU-based scaling
+    - name: cpu-scaling
+      description: "Scale up on high CPU usage with gradual revert"
+      conditions:
+        - type: CPUUsage
+          threshold: "80%"
+          duration: "5m"
+      actions:
+        - type: ScaleUp
+          target:
+            kind: Deployment
+            name: ${TARGET_NAME}
+            namespace: ${TARGET_NAMESPACE}
+          scalingParams:
+            temporaryMaxReplicas: 5
+            scalingDuration: "30m"
+            revertStrategy: "Gradual"
+          # Pre-action validation
+          preActionHook: "https://validator.example.com/pre-scale"
+          # Post-action notification
+          postActionHook: "https://notify.example.com/post-scale"
+    
+    # Memory-based remediation
+    - name: memory-protection
+      description: "Protect against memory exhaustion"
+      conditions:
+        - type: MemoryUsage
+          threshold: "90%"
+          duration: "2m"
+      actions:
+        - type: RestartPod
+          target:
+            kind: Pod
+            name: ${TARGET_NAME}
+            namespace: ${TARGET_NAMESPACE}
+    
+    # Error rate handling
+    - name: error-rate-scaling
+      description: "Scale on high error rates"
+      conditions:
+        - type: ErrorRate
+          threshold: "50"
+          duration: "1m"
+      actions:
+        - type: ScaleUp
+          target:
+            kind: Deployment
+            name: ${TARGET_NAME}
+            namespace: ${TARGET_NAMESPACE}
+          scalingParams:
+            temporaryMaxReplicas: 3
+            scalingDuration: "15m"
+            revertStrategy: "Immediate"
+
+  # Safety limits
+  safetyLimits:
+    maxScaleFactor: 2
+    minPods: 1
+    maxScalingDuration: "1h"
+    maxActionsPerHour: 5
+
+  # Conflict resolution
+  conflictResolution:
+    strategy: "Override"
+    notifyConflicts: true 

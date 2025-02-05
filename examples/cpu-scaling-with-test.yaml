@@ -1,0 +1,134 @@
+---
+# KubeMedic CPU Scaling Example with Test Application
+# This example demonstrates:
+# 1. A test application that can generate controlled CPU load
+# 2. A remediation policy that scales based on CPU usage
+# 3. Instructions for testing and monitoring
+
+# Test Application Deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cpu-test
+  namespace: default
+  labels:
+    app: cpu-test
+    test: "true"
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: cpu-test
+  template:
+    metadata:
+      labels:
+        app: cpu-test
+    spec:
+      containers:
+      - name: stress
+        image: busybox
+        command: ["/bin/sh"]
+        args:
+          - -c
+          - |
+            # Create control file for CPU load management
+            mkdir -p /tmp/control
+            echo "0" > /tmp/control/cpu_load
+
+            while true; do
+              # Read desired CPU load (0-100)
+              LOAD=$(cat /tmp/control/cpu_load)
+              
+              if [ "$LOAD" -gt "0" ]; then
+                # Generate CPU load based on setting
+                for i in $(seq 1 $LOAD); do
+                  echo "scale=2000; 4*a(1)" | bc -l &
+                  sleep 0.01
+                done
+                wait
+              else
+                # Idle when no load requested
+                sleep 1
+              fi
+            done
+        resources:
+          requests:
+            cpu: 100m
+            memory: 64Mi
+          limits:
+            cpu: 200m
+            memory: 128Mi
+        volumeMounts:
+        - name: control
+          mountPath: /tmp/control
+      volumes:
+      - name: control
+        emptyDir: {}
+
+---
+# Service for accessing the test pod
+apiVersion: v1
+kind: Service
+metadata:
+  name: cpu-test
+  namespace: default
+spec:
+  selector:
+    app: cpu-test
+  ports:
+  - port: 80
+    targetPort: 8080
+
+---
+# Remediation Policy for CPU-based scaling
+apiVersion: remediation.kubemedic.io/v1alpha1
+kind: SelfRemediationPolicy
+metadata:
+  name: cpu-scaling-policy
+  namespace: default
+spec:
+  rules:
+    - name: cpu-high-usage
+      conditions:
+        - type: PodCPUUsage
+          threshold: "80"    # Trigger when CPU usage exceeds 80%
+          duration: "30s"    # Must exceed for 30 seconds
+      actions:
+        - type: ScaleUp
+          target:
+            kind: Deployment
+            name: cpu-test
+          scalingParams:
+            temporaryMaxReplicas: 3
+            scalingDuration: "2m"
+            revertStrategy: "Immediate"
+  cooldownPeriod: "1m"    # Wait 1 minute between scaling actions
+
+---
+# Testing Instructions (in YAML comments)
+#
+# 1. Apply this example:
+#    kubectl apply -f cpu-scaling-with-test.yaml
+#
+# 2. Wait for the pod to be ready:
+#    kubectl wait --for=condition=ready pod -l app=cpu-test
+#
+# 3. Generate CPU load (80%):
+#    kubectl exec $(kubectl get pod -l app=cpu-test -o jsonpath='{.items[0].metadata.name}') \
+#      -- /bin/sh -c 'echo "80" > /tmp/control/cpu_load'
+#
+# 4. Monitor CPU usage:
+#    kubectl top pod -l app=cpu-test --containers
+#
+# 5. Watch scaling:
+#    kubectl get pods -l app=cpu-test -w
+#
+# 6. Check remediation policy status:
+#    kubectl get selfremediationpolicy cpu-scaling-policy -o yaml
+#
+# 7. Stop CPU load:
+#    kubectl exec $(kubectl get pod -l app=cpu-test -o jsonpath='{.items[0].metadata.name}') \
+#      -- /bin/sh -c 'echo "0" > /tmp/control/cpu_load'
+#
+# 8. Clean up:
+#    kubectl delete -f cpu-scaling-with-test.yaml 

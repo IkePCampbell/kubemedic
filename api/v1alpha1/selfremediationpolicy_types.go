@@ -38,6 +38,8 @@ const (
 	ScaleDown         ActionType = "ScaleDown"
 	RestartPod        ActionType = "RestartPod"
 	RollbackDeployment ActionType = "RollbackDeployment"
+	UpdateResources   ActionType = "UpdateResources"
+	AdjustHPALimits  ActionType = "AdjustHPALimits"
 )
 
 // Condition defines what to monitor
@@ -66,6 +68,25 @@ type Target struct {
 	Namespace string `json:"namespace,omitempty"`
 }
 
+// ScalingParameters defines how scaling should be handled
+type ScalingParameters struct {
+	// TemporaryMaxReplicas allows temporary override of HPA/Argo maxReplicas
+	// +optional
+	TemporaryMaxReplicas *int32 `json:"temporaryMaxReplicas,omitempty"`
+
+	// Duration for how long to maintain the temporary scaling
+	// +optional
+	ScalingDuration string `json:"scalingDuration,omitempty"`
+
+	// RevertStrategy defines how to revert changes (Gradual or Immediate)
+	// +optional
+	RevertStrategy string `json:"revertStrategy,omitempty"`
+
+	// NotificationWebhook for sending scaling decisions
+	// +optional
+	NotificationWebhook string `json:"notificationWebhook,omitempty"`
+}
+
 // Action defines what remediation to take
 type Action struct {
 	// Type of action to take
@@ -74,6 +95,22 @@ type Action struct {
 	// Target resource for the action
 	// +optional
 	Target Target `json:"target,omitempty"`
+
+	// ScalingParams for detailed scaling configuration
+	// +optional
+	ScalingParams *ScalingParameters `json:"scalingParams,omitempty"`
+
+	// PreActionHook webhook to call before taking action
+	// +optional
+	PreActionHook string `json:"preActionHook,omitempty"`
+
+	// PostActionHook webhook to call after taking action
+	// +optional
+	PostActionHook string `json:"postActionHook,omitempty"`
+
+	// ConflictResolution defines how to handle conflicts with other controllers
+	// +optional
+	ConflictResolution string `json:"conflictResolution,omitempty"`
 }
 
 // Rule defines a single remediation rule

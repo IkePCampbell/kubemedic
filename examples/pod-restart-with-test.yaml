@@ -1,0 +1,140 @@
+---
+# KubeMedic Pod Restart Example with Test Application
+# This example demonstrates:
+# 1. A test application that generates errors at a controlled rate
+# 2. A remediation policy that restarts pods based on error rate
+# 3. Instructions for testing and monitoring
+
+# Test Application Deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: error-test
+  namespace: default
+  labels:
+    app: error-test
+    test: "true"
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: error-test
+  template:
+    metadata:
+      labels:
+        app: error-test
+    spec:
+      containers:
+      - name: error-generator
+        image: nginx:alpine
+        ports:
+        - containerPort: 8080
+        command: ["/bin/sh"]
+        args:
+          - -c
+          - |
+            # Create control file for error rate management
+            mkdir -p /tmp/control
+            echo "0" > /tmp/control/error_rate
+
+            while true; do
+              # Read desired error rate (errors per second)
+              RATE=$(cat /tmp/control/error_rate)
+              
+              if [ "$RATE" -gt "0" ]; then
+                # Generate errors in nginx error log
+                for i in $(seq 1 $RATE); do
+                  echo "[error] Test error message $i" >> /var/log/nginx/error.log
+                  sleep 1
+                done
+              else
+                sleep 1
+              fi
+            done
+        resources:
+          requests:
+            cpu: 100m
+            memory: 64Mi
+          limits:
+            cpu: 200m
+            memory: 128Mi
+        volumeMounts:
+        - name: control
+          mountPath: /tmp/control
+      volumes:
+      - name: control
+        emptyDir: {}
+
+---
+# Service for accessing the test pod
+apiVersion: v1
+kind: Service
+metadata:
+  name: error-test
+  namespace: default
+spec:
+  selector:
+    app: error-test
+  ports:
+  - port: 80
+    targetPort: 8080
+
+---
+# Remediation Policy for Error-based pod restart
+apiVersion: remediation.kubemedic.io/v1alpha1
+kind: SelfRemediationPolicy
+metadata:
+  name: error-restart-policy
+  namespace: default
+spec:
+  rules:
+    - name: high-error-rate
+      conditions:
+        - type: ErrorRate
+          threshold: "5"     # Trigger when error rate exceeds 5 per second
+          duration: "30s"    # Must exceed for 30 seconds
+      actions:
+        - type: RestartPod
+          target:
+            kind: Pod
+            name: error-test
+    - name: repeated-restarts
+      conditions:
+        - type: PodRestarts
+          threshold: "3"     # If pod restarts more than 3 times
+          duration: "5m"     # Within 5 minutes
+      actions:
+        - type: RollbackDeployment
+          target:
+            kind: Deployment
+            name: error-test
+  cooldownPeriod: "2m"    # Wait 2 minutes between restart actions
+
+---
+# Testing Instructions (in YAML comments)
+#
+# 1. Apply this example:
+#    kubectl apply -f pod-restart-with-test.yaml
+#
+# 2. Wait for the pod to be ready:
+#    kubectl wait --for=condition=ready pod -l app=error-test
+#
+# 3. Generate errors (5 per second):
+#    kubectl exec $(kubectl get pod -l app=error-test -o jsonpath='{.items[0].metadata.name}') \
+#      -- /bin/sh -c 'echo "5" > /tmp/control/error_rate'
+#
+# 4. Monitor error logs:
+#    kubectl logs -f -l app=error-test
+#
+# 5. Watch pod restarts:
+#    kubectl get pods -l app=error-test -w
+#
+# 6. Check remediation policy status:
+#    kubectl get selfremediationpolicy error-restart-policy -o yaml
+#
+# 7. Stop error generation:
+#    kubectl exec $(kubectl get pod -l app=error-test -o jsonpath='{.items[0].metadata.name}') \
+#      -- /bin/sh -c 'echo "0" > /tmp/control/error_rate'
+#
+# 8. Clean up:
+#    kubectl delete -f pod-restart-with-test.yaml 

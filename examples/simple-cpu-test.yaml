@@ -1,0 +1,49 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: test-app
+  namespace: default
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: test
+  template:
+    metadata:
+      labels:
+        app: test
+    spec:
+      containers:
+      - name: stress
+        image: polinux/stress
+        resources:
+          requests:
+            cpu: 100m
+            memory: 100Mi
+          limits:
+            cpu: 200m
+            memory: 200Mi
+        command: ["stress"]
+        args: ["--cpu", "1"]
+---
+apiVersion: remediation.kubemedic.io/v1alpha1
+kind: SelfRemediationPolicy
+metadata:
+  name: simple-cpu-policy
+  namespace: default
+spec:
+  rules:
+    - name: simple-cpu-scaling
+      conditions:
+        - type: PodCPUUsage  # We'll watch pod CPU directly via metrics API
+          threshold: "80"     # Raw percentage, no % sign needed
+          duration: "30s"     # Shorter duration for testing
+      actions:
+        - type: ScaleUp
+          target:
+            kind: Deployment
+            name: test-app
+          scalingParams:
+            temporaryMaxReplicas: 3
+            scalingDuration: "2m"    # Short duration for testing
+            revertStrategy: "Immediate"  # Simple revert 

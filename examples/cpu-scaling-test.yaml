@@ -1,0 +1,49 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: test-app
+  namespace: default
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: test
+  template:
+    metadata:
+      labels:
+        app: test
+    spec:
+      containers:
+      - name: stress
+        image: polinux/stress
+        resources:
+          requests:
+            cpu: 100m
+            memory: 100Mi
+          limits:
+            cpu: 200m
+            memory: 200Mi
+        command: ["stress"]
+        args: ["--cpu", "1"]
+---
+apiVersion: remediation.kubemedic.io/v1alpha1
+kind: SelfRemediationPolicy
+metadata:
+  name: cpu-test-policy
+  namespace: default
+spec:
+  rules:
+    - name: cpu-scaling
+      conditions:
+        - type: CPUUsage
+          threshold: "80%"
+          duration: "1m"
+      actions:
+        - type: ScaleUp
+          target:
+            kind: Deployment
+            name: test-app
+          scalingParams:
+            temporaryMaxReplicas: 3
+            scalingDuration: "5m"
+            revertStrategy: "Gradual" 

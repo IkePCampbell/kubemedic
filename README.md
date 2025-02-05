@@ -1,211 +1,219 @@
-# KubeMedic - Automated First Aid for Kubernetes Remediation
+# KubeMedic - Safe Kubernetes Auto-Remediation
 
-KubeMedic is a powerful, proactive Kubernetes operator that acts as your cluster's autonomous remediation system. Instead of waiting for incidents to occur, KubeMedic continuously monitors your services and takes preemptive actions to maintain optimal cluster health.
+KubeMedic is a Kubernetes operator that safely automates common remediation tasks while protecting your cluster from unintended consequences.
 
-## 🌟 Why KubeMedic?
+## Prerequisites
 
-### Proactive, Not Reactive
-Traditional monitoring tools alert you after problems occur. KubeMedic takes action before small issues become major incidents:
-- 🔄 Automatically scales resources based on usage trends
-- 🚫 Prevents cascading failures through early detection
-- 🎯 Takes precise, targeted actions based on customizable conditions
+### Required
+- Kubernetes cluster (v1.16+)
+- [Metrics Server](https://github.com/kubernetes-sigs/metrics-server) installed in your cluster
+  ```bash
+  kubectl apply -f https://github.com/kubernetes-sigs/metrics-server/releases/latest/download/components.yaml
+  ```
 
-### Self-Sufficient Yet Integrated
-- 🤖 Operates autonomously with minimal human intervention
-- 📊 Optional Grafana integration for enhanced visibility
-- 🔌 Webhook support for existing monitoring stack integration
+### Optional
+- Prometheus & Grafana for advanced metrics visualization
+  - KubeMedic works with the native Kubernetes metrics API by default
+  - Can be integrated with Prometheus for historical data and advanced querying
+  - Grafana dashboards available for visualization
 
-### Smart Remediation
-- 🧠 Intelligent cooldown periods prevent remediation storms
-- 🎛️ Fine-grained control over conditions and actions
-- 🛡️ Built-in safeguards and manual override options
+## Key Features
 
-## 🚀 Features
+### 🛡️ Safe by Default
+- Protected system namespaces (kube-system, etc.)
+- Resource quotas and scaling limits
+- Automatic state backups before actions
+- Gradual scaling with automatic revert
 
-### Comprehensive Monitoring
-- CPU and Memory usage tracking
-- Error rate monitoring
-- Pod restart counting
-- Extensible monitoring framework
+### 🎯 Common Remediations
+- CPU/Memory-based scaling
+- Pod restart on high error rates
+- HPA limit adjustments
+- Temporary resource overrides
 
-### Automated Actions
-- Dynamic scaling (up/down)
-- Intelligent pod restarts
-- Deployment rollbacks
-- Custom action framework
+### 🔒 Built-in Safeguards
+- Maximum scale factor (2x by default)
+- Rate limiting and cooldown periods
+- Resource quota validation
+- Protected resources via labels
 
-### Enterprise Ready
-- 🔒 Secure by design
-- 📈 Prometheus metrics
-- 📋 Detailed audit logging
-- 🎯 Namespace-scoped policies
+## Quick Start
 
-## 🛠️ Getting Started
+1. **Install Metrics Server** (if not already installed)
+```bash
+kubectl apply -f https://github.com/kubernetes-sigs/metrics-server/releases/latest/download/components.yaml
+```
 
-### Prerequisites
-
-#### Required
-- Kubernetes cluster v1.16+ (AKS, EKS, GKE, or any other distribution)
-- `kubectl` installed and configured
-- Prometheus installed in your cluster for metrics collection
-
-#### Optional (but recommended)
-- Grafana v8.0+ for metrics visualization
-- Helm v3+ for streamlined installation
-
-### Installation
-
-#### Quick Start
+2. **Install KubeMedic**
 ```bash
 kubectl apply -f https://raw.githubusercontent.com/ikepcampbell/kubemedic/main/config/deploy/kubemedic.yaml
 ```
 
-#### Using Helm
-```bash
-# Add the repository
-helm repo add kubemedic https://kubemedic.github.io/charts
-
-# Update repositories
-helm repo update
-
-# Install KubeMedic with default settings
-helm install kubemedic kubemedic/kubemedic
-
-# Or with custom values
-helm install kubemedic kubemedic/kubemedic -f my-values.yaml
-```
-
-#### Manual Installation
-```bash
-# Clone the repository
-git clone https://github.com/ikepcampbell/kubemedic.git
-cd kubemedic
-
-# Install CRDs
-make install
-
-# Deploy the operator
-make deploy IMG=ghcr.io/ikepcampbell/kubemedic:latest
-```
-
-### Verifying the Installation
-
-```bash
-# Check if the operator is running
-kubectl get pods -n kubemedic-system
-
-# Expected output:
-# NAME                        READY   STATUS    RESTARTS   AGE
-# kubemedic-controller-xxx    1/1     Running   0          1m
-
-# Verify CRD installation
-kubectl get crds | grep kubemedic
-```
-
-### Basic Configuration
-
-Create a policy to auto-scale a deployment based on CPU usage:
-
+3. **Create a Simple Policy**
 ```yaml
 apiVersion: remediation.kubemedic.io/v1alpha1
 kind: SelfRemediationPolicy
 metadata:
-  name: cpu-autoscale-policy
-  namespace: default
+  name: cpu-scaling
+  namespace: my-app
 spec:
   rules:
-    - name: cpu-scaling
+    - name: high-cpu-scale
       conditions:
-        - type: CPUUsage
-          threshold: "80%"
+        - type: PodCPUUsage    # Uses metrics-server directly
+          threshold: "80"      # 80% CPU usage
           duration: "5m"
       actions:
         - type: ScaleUp
           target:
             kind: Deployment
-            name: my-app
-  cooldownPeriod: "10m"
+            name: my-service
+          scalingParams:
+            temporaryMaxReplicas: 5
+            scalingDuration: "30m"
+            revertStrategy: "Gradual"
 ```
 
-Apply the configuration:
-```bash
-kubectl apply -f cpu-autoscale-policy.yaml
-```
+## Monitoring Options
 
-## 📚 Documentation
+### 1. Basic Monitoring (Default)
+- Uses Kubernetes metrics API directly
+- Real-time metrics without historical data
+- View with kubectl:
+  ```bash
+  kubectl top pods
+  kubectl get pods
+  kubectl describe selfremediationpolicy
+  ```
 
-### Architecture
-KubeMedic follows a streamlined architecture:
-1. **Watch** - Monitors your resources
-2. **Analyze** - Evaluates conditions against thresholds
-3. **Act** - Takes remediation actions when needed
-4. **Learn** - Adjusts based on action outcomes
-
-### Configuration Options
-
-#### Prometheus Integration
+### 2. Advanced Monitoring (Optional)
+#### With Prometheus
 ```yaml
 # values.yaml
-prometheus:
-  url: http://prometheus.monitoring:9090
-  scrapeInterval: 30s
-```
-
-#### Grafana Integration
-```yaml
-# in your SelfRemediationPolicy
-spec:
-  grafanaIntegration:
+monitoring:
+  prometheus:
     enabled: true
-    webhookUrl: "https://grafana.example.com/webhook"
+    serviceMonitor:
+      enabled: true    # If using prometheus-operator
+    rules:
+      enabled: true    # Install default alerting rules
 ```
 
-See our [examples](./examples) directory for more configurations.
+#### With Grafana
+```yaml
+monitoring:
+  grafana:
+    enabled: true
+    dashboards:
+      enabled: true    # Install default dashboards
+```
 
-## 🔧 Troubleshooting
+## Testing KubeMedic
 
-### Common Issues
+KubeMedic comes with comprehensive examples that include both policies and test applications. Each example is self-contained and includes step-by-step testing instructions.
 
-#### Operator Status Check
-1. Verify operator status:
-   ```bash
-   kubectl logs -n kubemedic-system deployment/kubemedic-controller
-   ```
-2. Check policy configuration:
-   ```bash
-   kubectl get srp -o yaml
-   ```
+### Available Examples
 
-#### Prometheus Connectivity
-1. Verify Prometheus connection:
-   ```bash
-   kubectl exec -it -n kubemedic-system deploy/kubemedic-controller -- curl -f prometheus:9090/-/healthy
-   ```
+1. **CPU Scaling Test**
+```bash
+# Apply the CPU scaling example
+kubectl apply -f examples/cpu-scaling-with-test.yaml
 
-## 🤝 Contributing
+# Follow the testing instructions in the file comments
+```
 
-We welcome contributions in various forms:
-- 🐛 Bug fixes
-- ✨ New features
-- 📚 Documentation improvements
-- 🎨 UI enhancements
+2. **Memory Scaling Test**
+```bash
+# Apply the memory scaling example
+kubectl apply -f examples/memory-scaling-with-test.yaml
 
-See our [Contributing Guide](CONTRIBUTING.md) for details.
+# Follow the testing instructions in the file comments
+```
 
-## 📜 License
+3. **Pod Restart Test**
+```bash
+# Apply the pod restart example
+kubectl apply -f examples/pod-restart-with-test.yaml
 
-Apache License 2.0 - See [LICENSE](LICENSE) for details.
+# Follow the testing instructions in the file comments
+```
 
-## 🌟 Community
+### Monitoring Tests
 
-If you find KubeMedic useful, please star the repository. It helps others discover the project!
+Monitor your tests using standard Kubernetes tools:
+```bash
+# Watch pods and policies
+kubectl get pods,selfremediationpolicy -w
 
-## 📞 Support
+# Monitor resource usage
+kubectl top pods
+
+# Check policy status
+kubectl describe selfremediationpolicy
+```
+
+## Safety Features
+
+### Protected Resources
+```yaml
+metadata:
+  labels:
+    kubemedic.io/protected: "true"  # Prevents any remediation
+```
+
+### Namespace Exclusion
+```yaml
+metadata:
+  labels:
+    kubemedic.io/exclude: "true"  # Excludes namespace from remediation
+```
+
+### Resource Limits
+- Maximum 2x scaling factor
+- Minimum 1 pod maintained
+- Maximum 2-hour remediation duration
+- Namespace quota validation
+
+## Configuration
+
+### values.yaml Highlights
+```yaml
+rbac:
+  # Namespace restrictions
+  namespaceRestrictions:
+    enabled: true
+    denied: ["kube-system", "kube-public"]
+
+  # Resource protection
+  resourceRestrictions:
+    enabled: true
+    allowed: ["deployments", "statefulsets"]
+
+remediation:
+  # Safety limits
+  safetyLimits:
+    maxScaleFactor: 2
+    minPods: 1
+    maxScalingDuration: "2h"
+
+monitoring:
+  # Metrics source
+  metricsSource: "kubernetes"  # or "prometheus"
+  # Optional Prometheus integration
+  prometheus:
+    enabled: false
+  # Optional Grafana integration
+  grafana:
+    enabled: false
+```
+
+## Support
 
 - 📖 [Documentation](./docs)
-- 💬 [Community Forum](https://github.com/ikepcampbell/kubemedic/discussions)
-- 🐤 [Twitter](https://twitter.com/kubemedic)
-- 📧 [Support](mailto:support@kubemedic.io)
+- 💬 [Discussions](https://github.com/ikepcampbell/kubemedic/discussions)
+- 💼 [Follow Ike](https://linkedin.com/in/isaac-campbell)
+- 📧 [Support](mailto:ike@isaacs.cloud)
 
-Remember: A healthy cluster is a happy cluster! 🎉
+## License
 
+Apache License 2.0 - See [LICENSE](LICENSE) for details.

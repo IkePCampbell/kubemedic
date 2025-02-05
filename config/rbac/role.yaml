@@ -2,31 +2,119 @@
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
-  name: manager-role
+  name: kubemedic-controller-role
+  labels:
+    app.kubernetes.io/name: kubemedic
+    app.kubernetes.io/instance: kubemedic
+    app.kubernetes.io/component: controller
 rules:
-- apiGroups:
-  - remediation.kubemedic.io
-  resources:
-  - selfremediationpolicies
-  verbs:
-  - create
-  - delete
-  - get
-  - list
-  - patch
-  - update
-  - watch
-- apiGroups:
-  - remediation.kubemedic.io
-  resources:
-  - selfremediationpolicies/finalizers
-  verbs:
-  - update
-- apiGroups:
-  - remediation.kubemedic.io
-  resources:
-  - selfremediationpolicies/status
-  verbs:
-  - get
-  - patch
-  - update
+# Core API access - minimal required permissions
+- apiGroups: [""]
+  resources: ["pods", "events"]
+  verbs: ["get", "list", "watch"]
+- apiGroups: [""]
+  resources: ["events"]
+  verbs: ["create", "patch"]
+
+# Workload access - read-only for most, update for specific resources
+- apiGroups: ["apps"]
+  resources: ["deployments", "statefulsets"]
+  verbs: ["get", "list", "watch"]
+- apiGroups: ["apps"]
+  resources: ["deployments/scale", "statefulsets/scale"]
+  verbs: ["get", "update", "patch"]
+
+# HPA access - careful control over scaling
+- apiGroups: ["autoscaling"]
+  resources: ["horizontalpodautoscalers"]
+  verbs: ["get", "list", "watch"]
+- apiGroups: ["autoscaling"]
+  resources: ["horizontalpodautoscalers/status"]
+  verbs: ["get", "update", "patch"]
+
+# Custom resource access
+- apiGroups: ["remediation.kubemedic.io"]
+  resources: ["selfremediationpolicies"]
+  verbs: ["get", "list", "watch"]
+- apiGroups: ["remediation.kubemedic.io"]
+  resources: ["selfremediationpolicies/status"]
+  verbs: ["get", "update", "patch"]
+
+# Metrics access - read-only
+- apiGroups: ["metrics.k8s.io"]
+  resources: ["pods", "nodes"]
+  verbs: ["get", "list"]
+
+# Leader election - required for HA
+- apiGroups: ["coordination.k8s.io"]
+  resources: ["leases"]
+  verbs: ["get", "list", "watch", "create", "update", "patch"]
+
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingWebhookConfiguration
+metadata:
+  name: kubemedic-validating-webhook
+webhooks:
+- name: validate.remediation.kubemedic.io
+  rules:
+  - apiGroups: ["remediation.kubemedic.io"]
+    apiVersions: ["v1alpha1"]
+    operations: ["CREATE", "UPDATE"]
+    resources: ["selfremediationpolicies"]
+    scope: "Namespaced"
+  clientConfig:
+    service:
+      namespace: kubemedic-system
+      name: kubemedic-webhook-service
+      path: "/validate"
+  admissionReviewVersions: ["v1"]
+  sideEffects: None
+  timeoutSeconds: 5
+  failurePolicy: Fail
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: kubemedic-leader-election-role
+  namespace: kubemedic-system
+rules:
+- apiGroups: [""]
+  resources: ["configmaps"]
+  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+- apiGroups: ["coordination.k8s.io"]
+  resources: ["leases"]
+  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+- apiGroups: [""]
+  resources: ["events"]
+  verbs: ["create", "patch"]
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: kubemedic-leader-election-rolebinding
+  namespace: kubemedic-system
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: kubemedic-leader-election-role
+subjects:
+- kind: ServiceAccount
+  name: kubemedic-controller
+  namespace: kubemedic-system
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: kubemedic-controller-rolebinding
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: kubemedic-controller-role
+subjects:
+- kind: ServiceAccount
+  name: kubemedic-controller
+  namespace: kubemedic-system

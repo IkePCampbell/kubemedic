@@ -1,0 +1,200 @@
+# KubeMedic Configuration Values
+# This file contains all possible configuration options for KubeMedic
+
+# Core operator configuration
+operator:
+  # -- Operator deployment replicas
+  replicas: 1
+  
+  # -- Log level (debug, info, warn, error)
+  logLevel: "info"
+  
+  # -- Metrics port for Prometheus scraping
+  metricsPort: 8080
+  
+  # -- Resources for the operator pod
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 256Mi
+
+# RBAC Configuration
+rbac:
+  # -- Enable RBAC controls
+  enabled: true
+  
+  # -- Create cluster role and binding
+  create: true
+  
+  # -- Service account configuration
+  serviceAccount:
+    # -- Create service account
+    create: true
+    # -- Name of the service account
+    name: "kubemedic-controller"
+    # -- Annotations for the service account
+    annotations: {}
+  
+  # -- Namespace restrictions
+  namespaceRestrictions:
+    # -- Enable namespace restrictions
+    enabled: false
+    # -- List of allowed namespaces for remediation
+    allowed:
+      - "default"
+      - "prod-*"  # Supports glob patterns
+    # -- List of denied namespaces
+    denied:
+      - "kube-system"
+      - "cert-manager"
+  
+  # -- Resource restrictions
+  resourceRestrictions:
+    # -- Enable resource type restrictions
+    enabled: false
+    # -- Allowed resource types for remediation
+    allowed:
+      - "deployments"
+      - "statefulsets"
+      - "horizontalpodautoscalers"
+    # -- Denied resource types
+    denied: []
+  
+  # -- Action restrictions
+  actionRestrictions:
+    # -- Enable action type restrictions
+    enabled: false
+    # -- Allowed remediation actions
+    allowed:
+      - "ScaleUp"
+      - "ScaleDown"
+      - "RestartPod"
+    # -- Denied actions
+    denied:
+      - "RollbackDeployment"  # Prevent rollbacks
+  
+  # -- User/Group restrictions
+  userRestrictions:
+    # -- Enable user/group restrictions
+    enabled: false
+    # -- Users allowed to manage remediation policies
+    allowedUsers:
+      - "cluster-admin"
+      - "platform-team-*"
+    # -- Groups allowed to manage remediation policies
+    allowedGroups:
+      - "system:masters"
+      - "platform-admins"
+
+# Remediation Configuration
+remediation:
+  # -- Global cooldown period between remediation actions
+  globalCooldownPeriod: "5m"
+  
+  # -- Maximum concurrent remediations
+  maxConcurrentRemediations: 5
+  
+  # -- Default scaling parameters
+  defaultScalingParams:
+    # -- Maximum replicas for temporary scaling
+    maxTemporaryReplicas: 10
+    # -- Default scaling duration
+    defaultScalingDuration: "30m"
+    # -- Default revert strategy (Immediate or Gradual)
+    defaultRevertStrategy: "Gradual"
+  
+  # -- Safety limits
+  safetyLimits:
+    # -- Maximum scale factor (e.g., 2 means max 2x original size)
+    maxScaleFactor: 2
+    # -- Minimum pods to maintain
+    minPods: 1
+    # -- Maximum scaling duration
+    maxScalingDuration: "2h"
+
+# Monitoring Integration
+monitoring:
+  # -- Prometheus configuration
+  prometheus:
+    # -- Enable Prometheus integration
+    enabled: true
+    # -- Prometheus service URL
+    url: "http://prometheus-server:9090"
+    # -- Scrape interval
+    scrapeInterval: "30s"
+    # -- Additional Prometheus labels
+    labels: {}
+  
+  # -- Grafana configuration
+  grafana:
+    # -- Enable Grafana integration
+    enabled: false
+    # -- Grafana URL
+    url: "http://grafana:3000"
+    # -- Grafana API key (if required)
+    apiKey: ""
+    # -- Dashboard configuration
+    dashboard:
+      # -- Create default dashboard
+      create: true
+      # -- Dashboard folder
+      folder: "KubeMedic"
+
+# Webhook Configuration
+webhooks:
+  # -- Global webhook settings
+  global:
+    # -- Enable webhooks
+    enabled: false
+    # -- Timeout for webhook calls
+    timeout: "5s"
+    # -- Retry attempts
+    retries: 3
+  
+  # -- Pre-action webhooks
+  preAction:
+    # -- URLs to notify before taking action
+    urls: []
+    # -- Headers to include
+    headers: {}
+  
+  # -- Post-action webhooks
+  postAction:
+    # -- URLs to notify after taking action
+    urls: []
+    # -- Headers to include
+    headers: {}
+
+# Argo CD Integration
+argocd:
+  # -- Enable Argo CD integration
+  enabled: false
+  # -- Argo CD server URL
+  serverUrl: "https://argocd-server"
+  # -- Webhook for notifying Argo CD
+  webhook: ""
+  # -- Conflict resolution strategy (Override or Skip)
+  conflictStrategy: "Override"
+
+# Advanced Configuration
+advanced:
+  # -- Leader election configuration
+  leaderElection:
+    # -- Enable leader election
+    enabled: true
+    # -- Lease duration
+    leaseDuration: "15s"
+    # -- Renew deadline
+    renewDeadline: "10s"
+  
+  # -- Feature gates
+  featureGates:
+    # -- Enable experimental features
+    experimentalFeatures: false
+    # -- Enable advanced scaling
+    advancedScaling: true
+    # -- Enable custom metrics
+    customMetrics: false 

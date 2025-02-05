@@ -1,0 +1,63 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: kubemedic-alerts
+  namespace: kubemedic-system
+  labels:
+    app.kubernetes.io/name: kubemedic
+    app.kubernetes.io/instance: kubemedic
+spec:
+  groups:
+  - name: kubemedic.rules
+    rules:
+    # Controller health
+    - alert: KubeMedicControllerDown
+      expr: up{job="kubemedic"} == 0
+      for: 5m
+      labels:
+        severity: critical
+      annotations:
+        summary: "KubeMedic controller is down"
+        description: "The KubeMedic controller has been down for more than 5 minutes"
+
+    # Remediation failures
+    - alert: KubeMedicRemediationFailureRate
+      expr: |
+        rate(kubemedic_remediation_failures_total[5m]) /
+        rate(kubemedic_remediation_attempts_total[5m]) > 0.2
+      for: 15m
+      labels:
+        severity: warning
+      annotations:
+        summary: "High remediation failure rate"
+        description: "More than 20% of remediation attempts are failing"
+
+    # Resource quotas
+    - alert: KubeMedicQuotaExceeded
+      expr: kubemedic_resource_quota_usage > 0.9
+      for: 5m
+      labels:
+        severity: warning
+      annotations:
+        summary: "Resource quota nearly exceeded"
+        description: "KubeMedic is approaching its resource quota limits"
+
+    # Action rate
+    - alert: KubeMedicHighActionRate
+      expr: rate(kubemedic_actions_total[5m]) > 10
+      for: 5m
+      labels:
+        severity: warning
+      annotations:
+        summary: "High remediation action rate"
+        description: "KubeMedic is performing more actions than expected"
+
+    # Webhook failures
+    - alert: KubeMedicWebhookFailures
+      expr: rate(kubemedic_webhook_failures_total[5m]) > 0
+      for: 15m
+      labels:
+        severity: warning
+      annotations:
+        summary: "Webhook communication failures"
+        description: "KubeMedic is experiencing webhook communication issues" 

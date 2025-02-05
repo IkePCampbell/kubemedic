@@ -1,0 +1,48 @@
+apiVersion: remediation.kubemedic.io/v1alpha1
+kind: SelfRemediationPolicy
+metadata:
+  name: advanced-scaling-policy
+  namespace: default
+spec:
+  rules:
+    - name: high-load-temporary-scaling
+      conditions:
+        - type: CPUUsage
+          threshold: "85%"
+          duration: "3m"
+      actions:
+        - type: AdjustHPALimits
+          target:
+            kind: HorizontalPodAutoscaler
+            name: my-app-hpa
+            namespace: default
+          scalingParams:
+            temporaryMaxReplicas: 5  # Temporarily allow up to 5 replicas
+            scalingDuration: "30m"   # Keep this override for 30 minutes
+            revertStrategy: "Gradual" # Gradually scale back down
+            notificationWebhook: "https://my-argo-server/webhook"
+          preActionHook: "https://my-notification-service/scaling-up"
+          postActionHook: "https://my-metrics-service/record-scaling"
+          conflictResolution: "Override" # Override HPA/Argo settings temporarily
+
+    - name: network-spike-handling
+      conditions:
+        - type: ErrorRate
+          threshold: "100"  # 100 errors per second
+          duration: "1m"
+      actions:
+        - type: ScaleUp
+          target:
+            kind: Deployment
+            name: my-app
+            namespace: default
+          scalingParams:
+            temporaryMaxReplicas: 8
+            scalingDuration: "15m"
+            revertStrategy: "Immediate"
+          preActionHook: "https://my-slack-webhook/notify-scaling"
+
+  cooldownPeriod: "5m"
+  grafanaIntegration:
+    enabled: true
+    webhookUrl: "https://grafana.example.com/webhook" 

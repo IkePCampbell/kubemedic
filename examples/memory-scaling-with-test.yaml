@@ -1,0 +1,125 @@
+---
+# KubeMedic Memory Scaling Example with Test Application
+# This example demonstrates:
+# 1. A test application that can generate controlled memory load
+# 2. A remediation policy that scales based on memory usage
+# 3. Instructions for testing and monitoring
+
+# Test Application Deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: memory-test
+  namespace: default
+  labels:
+    app: memory-test
+    test: "true"
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: memory-test
+  template:
+    metadata:
+      labels:
+        app: memory-test
+    spec:
+      containers:
+      - name: stress
+        image: polinux/stress
+        command: ["stress"]
+        args: ["--vm", "1", "--vm-bytes", "64M", "--vm-hang", "0"]
+        env:
+        - name: MEMORY_LOAD
+          value: "0"
+        resources:
+          requests:
+            cpu: 100m
+            memory: 100Mi
+          limits:
+            cpu: 200m
+            memory: 200Mi
+        volumeMounts:
+        - name: control
+          mountPath: /tmp/control
+      volumes:
+      - name: control
+        emptyDir: {}
+
+---
+# Service for accessing the test pod
+apiVersion: v1
+kind: Service
+metadata:
+  name: memory-test
+  namespace: default
+spec:
+  selector:
+    app: memory-test
+  ports:
+  - port: 80
+    targetPort: 8080
+
+---
+# Remediation Policy for Memory-based scaling
+apiVersion: remediation.kubemedic.io/v1alpha1
+kind: SelfRemediationPolicy
+metadata:
+  name: memory-scaling-policy
+  namespace: default
+spec:
+  rules:
+    - name: memory-high-usage
+      conditions:
+        - type: MemoryUsage
+          threshold: "90"    # Trigger when memory usage exceeds 90%
+          duration: "30s"    # Must exceed for 30 seconds
+      actions:
+        - type: ScaleUp
+          target:
+            kind: Deployment
+            name: memory-test
+          scalingParams:
+            temporaryMaxReplicas: 3
+            scalingDuration: "2m"
+            revertStrategy: "Gradual"
+    - name: critical-memory
+      conditions:
+        - type: MemoryUsage
+          threshold: "95"    # Critical memory threshold
+          duration: "10s"    # Quick response needed
+      actions:
+        - type: RestartPod
+          target:
+            kind: Pod
+            name: memory-test
+  cooldownPeriod: "1m"    # Wait 1 minute between scaling actions
+
+---
+# Testing Instructions (in YAML comments)
+#
+# 1. Apply this example:
+#    kubectl apply -f memory-scaling-with-test.yaml
+#
+# 2. Wait for the pod to be ready:
+#    kubectl wait --for=condition=ready pod -l app=memory-test
+#
+# 3. Generate memory load (start with 90MB out of 100MB limit):
+#    kubectl exec $(kubectl get pod -l app=memory-test -o jsonpath='{.items[0].metadata.name}') \
+#      -- stress --vm 1 --vm-bytes 90M
+#
+# 4. Monitor memory usage:
+#    kubectl top pod -l app=memory-test --containers
+#
+# 5. Watch scaling:
+#    kubectl get pods -l app=memory-test -w
+#
+# 6. Check remediation policy status:
+#    kubectl get selfremediationpolicy memory-scaling-policy -o yaml
+#
+# 7. Stop the stress test:
+#    kubectl exec $(kubectl get pod -l app=memory-test -o jsonpath='{.items[0].metadata.name}') \
+#      -- pkill stress
+#
+# 8. Clean up:
+#    kubectl delete -f memory-scaling-with-test.yaml 
