@@ -1,0 +1,30 @@
+apiVersion: remediation.kubemedic.io/v1alpha1
+kind: SelfRemediationPolicy
+metadata:
+  name: error-rate-restart
+  namespace: default
+spec:
+  rules:
+    - name: high-error-rate-restart
+      conditions:
+        - type: ErrorRate
+          threshold: "5"  # 5 errors per second
+          duration: "2m"
+      actions:
+        - type: RestartPod
+          target:
+            kind: Pod
+            name: error-prone-service
+            namespace: default
+    - name: repeated-pod-restarts
+      conditions:
+        - type: PodRestarts
+          threshold: "3"  # More than 3 restarts
+          duration: "10m"
+      actions:
+        - type: RollbackDeployment
+          target:
+            kind: Deployment
+            name: error-prone-service
+            namespace: default
+  cooldownPeriod: "5m" 

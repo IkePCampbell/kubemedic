@@ -1,0 +1,22 @@
+apiVersion: remediation.kubemedic.io/v1alpha1
+kind: SelfRemediationPolicy
+metadata:
+  name: high-cpu-autoscale
+  namespace: default
+spec:
+  rules:
+    - name: high-cpu-scale-up
+      conditions:
+        - type: CPUUsage
+          threshold: "80%"
+          duration: "5m"
+      actions:
+        - type: ScaleUp
+          target:
+            kind: Deployment
+            name: high-load-service
+            namespace: default
+  cooldownPeriod: "15m"
+  grafanaIntegration:
+    enabled: true
+    webhookUrl: "https://grafana.example.com/webhook" 
