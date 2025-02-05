@@ -20,26 +20,112 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-// EDIT THIS FILE!  THIS IS SCAFFOLDING FOR YOU TO OWN!
-// NOTE: json tags are required.  Any new fields you add must have json tags for the fields to be serialized.
+// ConditionType defines the type of condition to monitor
+type ConditionType string
 
-// SelfRemediationPolicySpec defines the desired state of SelfRemediationPolicy
+const (
+	CPUUsage       ConditionType = "CPUUsage"
+	MemoryUsage    ConditionType = "MemoryUsage"
+	ErrorRate      ConditionType = "ErrorRate"
+	PodRestarts    ConditionType = "PodRestarts"
+)
+
+// ActionType defines the type of remediation action
+type ActionType string
+
+const (
+	ScaleUp           ActionType = "ScaleUp"
+	ScaleDown         ActionType = "ScaleDown"
+	RestartPod        ActionType = "RestartPod"
+	RollbackDeployment ActionType = "RollbackDeployment"
+)
+
+// Condition defines what to monitor
+type Condition struct {
+	// Type of condition to monitor
+	Type ConditionType `json:"type"`
+	
+	// Threshold value as a string (e.g., "80%", "100m", "2")
+	Threshold string `json:"threshold"`
+	
+	// Duration the condition must be true before taking action
+	// +optional
+	Duration string `json:"duration,omitempty"`
+}
+
+// Target defines the resource to apply remediation on
+type Target struct {
+	// Kind of the target resource
+	Kind string `json:"kind"`
+	
+	// Name of the target resource
+	Name string `json:"name"`
+	
+	// Namespace of the target resource
+	// +optional
+	Namespace string `json:"namespace,omitempty"`
+}
+
+// Action defines what remediation to take
+type Action struct {
+	// Type of action to take
+	Type ActionType `json:"type"`
+	
+	// Target resource for the action
+	// +optional
+	Target Target `json:"target,omitempty"`
+}
+
+// Rule defines a single remediation rule
+type Rule struct {
+	// Name of the rule
+	Name string `json:"name"`
+	
+	// Conditions that trigger the rule
+	Conditions []Condition `json:"conditions"`
+	
+	// Actions to take when conditions are met
+	Actions []Action `json:"actions"`
+}
+
+// GrafanaIntegration defines optional Grafana integration settings
+type GrafanaIntegration struct {
+	// Whether Grafana integration is enabled
+	Enabled bool `json:"enabled"`
+	
+	// Webhook URL for Grafana alerts
+	// +optional
+	WebhookURL string `json:"webhookUrl,omitempty"`
+}
+
+// SelfRemediationPolicySpec defines the desired state
 type SelfRemediationPolicySpec struct {
-	// INSERT ADDITIONAL SPEC FIELDS - desired state of cluster
-	// Important: Run "make" to regenerate code after modifying this file
-
-	// Foo is an example field of SelfRemediationPolicy. Edit selfremediationpolicy_types.go to remove/update
-	Foo string `json:"foo,omitempty"`
+	// Rules for remediation
+	Rules []Rule `json:"rules"`
+	
+	// CooldownPeriod between remediation actions
+	// +optional
+	CooldownPeriod string `json:"cooldownPeriod,omitempty"`
+	
+	// GrafanaIntegration configuration
+	// +optional
+	GrafanaIntegration *GrafanaIntegration `json:"grafanaIntegration,omitempty"`
 }
 
-// SelfRemediationPolicyStatus defines the observed state of SelfRemediationPolicy
+// SelfRemediationPolicyStatus defines the observed state
 type SelfRemediationPolicyStatus struct {
-	// INSERT ADDITIONAL STATUS FIELD - define observed state of cluster
-	// Important: Run "make" to regenerate code after modifying this file
+	// Last time the policy was evaluated
+	LastEvaluationTime *metav1.Time `json:"lastEvaluationTime,omitempty"`
+	
+	// Last remediation action taken
+	LastRemediationAction string `json:"lastRemediationAction,omitempty"`
+	
+	// Current state of the policy
+	State string `json:"state,omitempty"`
 }
 
-// +kubebuilder:object:root=true
-// +kubebuilder:subresource:status
+//+kubebuilder:object:root=true
+//+kubebuilder:subresource:status
 
 // SelfRemediationPolicy is the Schema for the selfremediationpolicies API
 type SelfRemediationPolicy struct {
@@ -50,7 +136,7 @@ type SelfRemediationPolicy struct {
 	Status SelfRemediationPolicyStatus `json:"status,omitempty"`
 }
 
-// +kubebuilder:object:root=true
+//+kubebuilder:object:root=true
 
 // SelfRemediationPolicyList contains a list of SelfRemediationPolicy
 type SelfRemediationPolicyList struct {
