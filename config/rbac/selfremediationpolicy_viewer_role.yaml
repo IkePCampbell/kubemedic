@@ -1,0 +1,23 @@
+# permissions for end users to view selfremediationpolicies.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  labels:
+    app.kubernetes.io/name: kubemedic
+    app.kubernetes.io/managed-by: kustomize
+  name: selfremediationpolicy-viewer-role
+rules:
+- apiGroups:
+  - remediation.kubemedic.io
+  resources:
+  - selfremediationpolicies
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - remediation.kubemedic.io
+  resources:
+  - selfremediationpolicies/status
+  verbs:
+  - get

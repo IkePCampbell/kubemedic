@@ -1,0 +1,27 @@
+# permissions for end users to edit selfremediationpolicies.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  labels:
+    app.kubernetes.io/name: kubemedic
+    app.kubernetes.io/managed-by: kustomize
+  name: selfremediationpolicy-editor-role
+rules:
+- apiGroups:
+  - remediation.kubemedic.io
+  resources:
+  - selfremediationpolicies
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - remediation.kubemedic.io
+  resources:
+  - selfremediationpolicies/status
+  verbs:
+  - get
