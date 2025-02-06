@@ -1,0 +1,27 @@
+# Build the webhook binary
+FROM golang:1.22 AS builder
+ARG TARGETOS
+ARG TARGETARCH
+
+WORKDIR /workspace
+# Copy the Go Modules manifests
+COPY go.mod go.mod
+COPY go.sum go.sum
+# cache deps before building and copying source so that we don't need to re-download as much
+RUN go mod download
+
+# Copy the go source
+COPY api/ api/
+COPY pkg/webhook/ pkg/webhook/
+COPY cmd/webhook/main.go cmd/webhook/main.go
+
+# Build
+RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} go build -a -o webhook cmd/webhook/main.go
+
+# Use distroless as minimal base image to package the webhook binary
+FROM gcr.io/distroless/static:nonroot
+WORKDIR /
+COPY --from=builder /workspace/webhook .
+USER 65532:65532
+
+ENTRYPOINT ["/webhook"] 

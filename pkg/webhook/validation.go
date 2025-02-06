@@ -7,31 +7,30 @@ import (
 	"strings"
 	"time"
 
-	"k8s.io/api/admission/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/runtime"
+	appsv1 "k8s.io/api/apps/v1"
+	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 
-	remediationv1alpha1 "github.com/ikepcampbell/kubemedic/api/v1alpha1"
+	remediationv1alpha1 "kubemedic/api/v1alpha1"
 )
 
-// PolicyValidator handles validation of SelfRemediationPolicy resources
-type PolicyValidator struct {
+// KubeMedicValidator handles validation of SelfRemediationPolicy resources
+type KubeMedicValidator struct {
 	Client  client.Client
-	decoder *admission.Decoder
+	decoder admission.Decoder
 }
 
-// Handle implements admission.Handler
-func (v *PolicyValidator) Handle(ctx context.Context, req admission.Request) admission.Response {
+// Handle validates SelfRemediationPolicy resources
+func (v *KubeMedicValidator) Handle(ctx context.Context, req admission.Request) admission.Response {
 	policy := &remediationv1alpha1.SelfRemediationPolicy{}
 
-	err := v.decoder.Decode(req, policy)
+	err := v.decoder.DecodeRaw(req.Object, policy)
 	if err != nil {
 		return admission.Errored(http.StatusBadRequest, err)
 	}
 
-	// Run all validations
 	if err := v.validatePolicy(ctx, policy); err != nil {
 		return admission.Denied(err.Error())
 	}
@@ -39,37 +38,30 @@ func (v *PolicyValidator) Handle(ctx context.Context, req admission.Request) adm
 	return admission.Allowed("")
 }
 
-// validatePolicy runs all validation checks
-func (v *PolicyValidator) validatePolicy(ctx context.Context, policy *remediationv1alpha1.SelfRemediationPolicy) error {
-	// Namespace restrictions
+// InjectDecoder injects the decoder
+func (v *KubeMedicValidator) InjectDecoder(d *admission.Decoder) error {
+	v.decoder = *d
+	return nil
+}
+
+// validatePolicy validates all aspects of the policy
+func (v *KubeMedicValidator) validatePolicy(ctx context.Context, policy *remediationv1alpha1.SelfRemediationPolicy) error {
 	if err := v.validateNamespace(ctx, policy); err != nil {
 		return err
 	}
 
-	// Resource restrictions
 	if err := v.validateResources(ctx, policy); err != nil {
 		return err
 	}
 
-	// Action restrictions
 	if err := v.validateActions(ctx, policy); err != nil {
-		return err
-	}
-
-	// Safety limits
-	if err := v.validateSafetyLimits(ctx, policy); err != nil {
-		return err
-	}
-
-	// Quota validation
-	if err := v.validateQuotas(ctx, policy); err != nil {
 		return err
 	}
 
 	return nil
 }
 
-func (v *PolicyValidator) validateNamespace(ctx context.Context, policy *remediationv1alpha1.SelfRemediationPolicy) error {
+func (v *KubeMedicValidator) validateNamespace(ctx context.Context, policy *remediationv1alpha1.SelfRemediationPolicy) error {
 	// Check if namespace is in denied list
 	deniedNamespaces := []string{
 		"kube-system",
@@ -98,10 +90,10 @@ func (v *PolicyValidator) validateNamespace(ctx context.Context, policy *remedia
 	return nil
 }
 
-func (v *PolicyValidator) validateResources(ctx context.Context, policy *remediationv1alpha1.SelfRemediationPolicy) error {
+func (v *KubeMedicValidator) validateResources(ctx context.Context, policy *remediationv1alpha1.SelfRemediationPolicy) error {
 	allowedResources := map[string]bool{
 		"deployments":              true,
-		"statefulsets":            true,
+		"statefulsets":             true,
 		"horizontalpodautoscalers": true,
 	}
 
@@ -121,12 +113,14 @@ func (v *PolicyValidator) validateResources(ctx context.Context, policy *remedia
 	return nil
 }
 
-func (v *PolicyValidator) validateActions(ctx context.Context, policy *remediationv1alpha1.SelfRemediationPolicy) error {
-	allowedActions := map[string]bool{
-		"ScaleUp":          true,
-		"ScaleDown":        true,
-		"RestartPod":       true,
-		"AdjustHPALimits": true,
+func (v *KubeMedicValidator) validateActions(ctx context.Context, policy *remediationv1alpha1.SelfRemediationPolicy) error {
+	allowedActions := map[remediationv1alpha1.ActionType]bool{
+		remediationv1alpha1.ScaleUp:            true,
+		remediationv1alpha1.ScaleDown:          true,
+		remediationv1alpha1.RestartPod:         true,
+		remediationv1alpha1.RollbackDeployment: true,
+		remediationv1alpha1.UpdateResources:    true,
+		remediationv1alpha1.AdjustHPALimits:    true,
 	}
 
 	for _, rule := range policy.Spec.Rules {
@@ -145,7 +139,7 @@ func (v *PolicyValidator) validateActions(ctx context.Context, policy *remediati
 	return nil
 }
 
-func (v *PolicyValidator) validateSafetyLimits(ctx context.Context, policy *remediationv1alpha1.SelfRemediationPolicy) error {
+func (v *KubeMedicValidator) validateSafetyLimits(ctx context.Context, policy *remediationv1alpha1.SelfRemediationPolicy) error {
 	// Global limits
 	maxScaleFactor := 2
 	maxDuration := 2 * time.Hour
@@ -188,7 +182,7 @@ func (v *PolicyValidator) validateSafetyLimits(ctx context.Context, policy *reme
 	return nil
 }
 
-func (v *PolicyValidator) validateQuotas(ctx context.Context, policy *remediationv1alpha1.SelfRemediationPolicy) error {
+func (v *KubeMedicValidator) validateQuotas(ctx context.Context, policy *remediationv1alpha1.SelfRemediationPolicy) error {
 	// Get namespace quotas
 	resourceQuota := &corev1.ResourceQuota{}
 	if err := v.Client.Get(ctx, client.ObjectKey{
@@ -214,7 +208,7 @@ func (v *PolicyValidator) validateQuotas(ctx context.Context, policy *remediatio
 	return nil
 }
 
-func (v *PolicyValidator) validateTargetResource(ctx context.Context, target remediationv1alpha1.Target) error {
+func (v *KubeMedicValidator) validateTargetResource(ctx context.Context, target remediationv1alpha1.Target) error {
 	// Get the target resource
 	obj := &unstructured.Unstructured{}
 	obj.SetKind(target.Kind)
@@ -236,13 +230,13 @@ func (v *PolicyValidator) validateTargetResource(ctx context.Context, target rem
 	return nil
 }
 
-func (v *PolicyValidator) validateActionParams(action remediationv1alpha1.Action) error {
+func (v *KubeMedicValidator) validateActionParams(action remediationv1alpha1.Action) error {
 	switch action.Type {
-	case "ScaleUp", "ScaleDown":
+	case remediationv1alpha1.ScaleUp, remediationv1alpha1.ScaleDown:
 		if action.ScalingParams == nil {
 			return fmt.Errorf("scaling parameters required for action type %s", action.Type)
 		}
-	case "AdjustHPALimits":
+	case remediationv1alpha1.AdjustHPALimits:
 		if action.ScalingParams == nil || action.ScalingParams.TemporaryMaxReplicas == nil {
 			return fmt.Errorf("temporary max replicas required for HPA adjustment")
 		}
@@ -251,7 +245,7 @@ func (v *PolicyValidator) validateActionParams(action remediationv1alpha1.Action
 	return nil
 }
 
-func (v *PolicyValidator) getCurrentReplicas(ctx context.Context, target remediationv1alpha1.Target) (int32, error) {
+func (v *KubeMedicValidator) getCurrentReplicas(ctx context.Context, target remediationv1alpha1.Target) (int32, error) {
 	switch target.Kind {
 	case "Deployment":
 		deploy := &appsv1.Deployment{}
@@ -278,22 +272,21 @@ func (v *PolicyValidator) getCurrentReplicas(ctx context.Context, target remedia
 	}
 }
 
-func (v *PolicyValidator) checkQuotaLimits(ctx context.Context, action remediationv1alpha1.Action, quota *corev1.ResourceQuota) error {
-	// Get resource requirements for the target
+func (v *KubeMedicValidator) checkQuotaLimits(ctx context.Context, action remediationv1alpha1.Action, quota *corev1.ResourceQuota) error {
 	requirements, err := v.getResourceRequirements(ctx, action.Target)
 	if err != nil {
 		return err
 	}
 
-	// Calculate total resource usage after scaling
-	proposedReplicas := *action.ScalingParams.TemporaryMaxReplicas
-	for resourceName, quantity := range requirements {
-		proposed := quantity.DeepCopy()
-		proposed.MultiplyInt64(int64(proposedReplicas))
+	// Calculate new resource usage
+	for resourceName, proposed := range requirements {
+		if hard, exists := quota.Status.Hard[resourceName]; exists {
+			// Convert to int64 for comparison
+			proposedValue := proposed.Value()
+			hardValue := hard.Value()
 
-		if quota.Status.Hard[resourceName] != nil {
-			if proposed.Cmp(*quota.Status.Hard[resourceName]) > 0 {
-				return fmt.Errorf("scaling would exceed quota for %s", resourceName)
+			if proposedValue > hardValue {
+				return fmt.Errorf("action would exceed quota for %s", resourceName)
 			}
 		}
 	}
@@ -301,7 +294,7 @@ func (v *PolicyValidator) checkQuotaLimits(ctx context.Context, action remediati
 	return nil
 }
 
-func (v *PolicyValidator) getResourceRequirements(ctx context.Context, target remediationv1alpha1.Target) (corev1.ResourceList, error) {
+func (v *KubeMedicValidator) getResourceRequirements(ctx context.Context, target remediationv1alpha1.Target) (corev1.ResourceList, error) {
 	switch target.Kind {
 	case "Deployment":
 		deploy := &appsv1.Deployment{}
@@ -342,9 +335,3 @@ func calculatePodResources(containers []corev1.Container) corev1.ResourceList {
 	}
 	return result
 }
-
-// InjectDecoder implements admission.DecoderInjector
-func (v *PolicyValidator) InjectDecoder(d *admission.Decoder) error {
-	v.decoder = d
-	return nil
-} 

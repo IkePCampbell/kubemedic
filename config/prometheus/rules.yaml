@@ -2,7 +2,7 @@ apiVersion: monitoring.coreos.com/v1
 kind: PrometheusRule
 metadata:
   name: kubemedic-alerts
-  namespace: kubemedic-system
+  namespace: kubemedic
   labels:
     app.kubernetes.io/name: kubemedic
     app.kubernetes.io/instance: kubemedic

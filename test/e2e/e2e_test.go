@@ -27,7 +27,7 @@ import (
 	"github.com/ikepcampbell/kubemedic/test/utils"
 )
 
-const namespace = "kubemedic-system"
+const namespace = "kubemedic"
 
 var _ = Describe("controller", Ordered, func() {
 	BeforeAll(func() {

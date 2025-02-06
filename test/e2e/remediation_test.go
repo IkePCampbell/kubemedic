@@ -9,8 +9,8 @@ import (
 	"github.com/stretchr/testify/require"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/util/intstr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	remediationv1alpha1 "github.com/ikepcampbell/kubemedic/api/v1alpha1"
@@ -47,7 +47,7 @@ func TestEndToEndRemediation(t *testing.T) {
 						{
 							Type:      "CPUUsage",
 							Threshold: "80%",
-							Duration: "1m",
+							Duration:  "1m",
 						},
 					},
 					Actions: []remediationv1alpha1.Action{
@@ -60,8 +60,8 @@ func TestEndToEndRemediation(t *testing.T) {
 							},
 							ScalingParams: &remediationv1alpha1.ScalingParameters{
 								TemporaryMaxReplicas: ptr.Int32(3),
-								ScalingDuration:    "5m",
-								RevertStrategy:     "Gradual",
+								ScalingDuration:      "5m",
+								RevertStrategy:       "Gradual",
 							},
 						},
 					},
@@ -109,7 +109,7 @@ func TestChaosScenarios(t *testing.T) {
 	k8sClient := setupTestEnv(t)
 
 	tests := []struct {
-		name string
+		name  string
 		chaos func(t *testing.T, deploy *appsv1.Deployment)
 	}{
 		{
@@ -262,4 +262,4 @@ func testPolicyPropagation(t *testing.T, clusters []client.Client) {
 
 func testClusterFailover(t *testing.T, clusters []client.Client) {
 	// Test cluster failover scenarios
-} 
+}

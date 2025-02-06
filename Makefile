@@ -51,6 +51,7 @@ endif
 OPERATOR_SDK_VERSION ?= v1.39.1
 # Image URL to use all building/pushing image targets
 IMG ?= ghcr.io/ikepcampbell/kubemedic:latest
+WEBHOOK_IMG ?= ghcr.io/ikepcampbell/kubemedic-webhook:latest
 # ENVTEST_K8S_VERSION refers to the version of kubebuilder assets to be downloaded by envtest binary.
 ENVTEST_K8S_VERSION = 1.27.1
 
@@ -340,3 +341,24 @@ test-local: install deploy ## Run local tests
 .PHONY: monitor
 monitor: ## Monitor the test deployments
 	watch kubectl get deployments,pods,srp -A
+
+.PHONY: build-webhook
+build-webhook: manifests generate fmt vet ## Build webhook binary.
+	go build -o bin/webhook cmd/webhook/main.go
+
+.PHONY: docker-build-webhook
+docker-build-webhook: ## Build docker image with the webhook.
+	$(CONTAINER_TOOL) build -t ${WEBHOOK_IMG} -f Dockerfile.webhook .
+
+.PHONY: docker-push-webhook
+docker-push-webhook: ## Push docker image with the webhook.
+	$(CONTAINER_TOOL) push ${WEBHOOK_IMG}
+
+.PHONY: docker-buildx-webhook
+docker-buildx-webhook: ## Build and push docker image for the webhook for cross-platform support
+	sed -e '1 s/\(^FROM\)/FROM --platform=\$$\{BUILDPLATFORM\}/; t' -e ' 1,// s//FROM --platform=\$$\{BUILDPLATFORM\}/' Dockerfile.webhook > Dockerfile.webhook.cross
+	- $(CONTAINER_TOOL) buildx create --name kubemedic-webhook-builder
+	$(CONTAINER_TOOL) buildx use kubemedic-webhook-builder
+	- $(CONTAINER_TOOL) buildx build --push --platform=$(PLATFORMS) --tag ${WEBHOOK_IMG} -f Dockerfile.webhook.cross .
+	- $(CONTAINER_TOOL) buildx rm kubemedic-webhook-builder
+	rm Dockerfile.webhook.cross

@@ -1,0 +1,93 @@
+# KubeMedic Configuration Values
+
+# Namespace configuration
+namespace: kubemedic
+
+# Controller configuration
+controller:
+  # Number of controller replicas
+  replicas: 1
+  
+  # Container image configuration
+  image:
+    repository: ikepcampbell/kubemedic-controller
+    tag: latest
+    pullPolicy: IfNotPresent
+  
+  # Resource limits and requests
+  resources:
+    limits:
+      cpu: 200m
+      memory: 256Mi
+    requests:
+      cpu: 100m
+      memory: 128Mi
+
+  # Log level (debug, info, warn, error)
+  logLevel: "info"
+
+# Webhook configuration
+webhook:
+  # Enable validation webhook
+  enabled: true
+  
+  # Container image configuration
+  image:
+    repository: ikepcampbell/kubemedic-webhook
+    tag: latest
+    pullPolicy: IfNotPresent
+  
+  # Resource limits and requests
+  resources:
+    limits:
+      cpu: 100m
+      memory: 128Mi
+    requests:
+      cpu: 50m
+      memory: 64Mi
+  
+  # TLS configuration
+  tls:
+    # Enable automatic cert generation using cert-manager
+    certManager: true
+    # Or provide your own certificates
+    # cert: ""
+    # key: ""
+    # caBundle: ""
+
+# RBAC configuration
+rbac:
+  # Create ClusterRole and ClusterRoleBinding
+  create: true
+  
+  # Service account name
+  serviceAccountName: kubemedic-controller
+
+# Metrics configuration
+metrics:
+  # Enable Prometheus metrics
+  enabled: true
+  
+  # Port to expose metrics on
+  port: 8080
+
+# Safety limits configuration
+safetyLimits:
+  # Maximum scale factor for remediation
+  maxScaleFactor: 2
+  
+  # Minimum number of pods to maintain
+  minPods: 1
+  
+  # Maximum duration for temporary scaling
+  maxScalingDuration: "2h"
+  
+  # Maximum number of actions per hour
+  maxActionsPerHour: 5
+
+# Integration configuration
+integrations:
+  # Grafana integration
+  grafana:
+    enabled: false
+    # webhookUrl: "https://grafana.example.com/webhook" 

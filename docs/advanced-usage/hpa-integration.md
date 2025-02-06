@@ -180,7 +180,7 @@ actions:
 
 1. Check KubeMedic logs:
 ```bash
-kubectl logs -n kubemedic-system deployment/kubemedic-controller-manager
+kubectl logs -n kubemedic deployment/kubemedic-controller-manager
 ```
 
 2. Verify annotations:

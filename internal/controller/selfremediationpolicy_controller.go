@@ -31,13 +31,13 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
-	remediationv1alpha1 "github.com/ikepcampbell/kubemedic/api/v1alpha1"
+	remediationv1alpha1 "kubemedic/api/v1alpha1"
 )
 
 // SelfRemediationPolicyReconciler reconciles a SelfRemediationPolicy object
 type SelfRemediationPolicyReconciler struct {
 	client.Client
-	Scheme        *runtime.Scheme
+	Scheme         *runtime.Scheme
 	MetricsWatcher *MetricsWatcher
 }
 
@@ -45,11 +45,12 @@ func NewSelfRemediationPolicyReconciler(
 	client client.Client,
 	scheme *runtime.Scheme,
 	metricsClient *versioned.Clientset,
+	kubeClient *kubernetes.Clientset,
 ) *SelfRemediationPolicyReconciler {
 	return &SelfRemediationPolicyReconciler{
 		Client:         client,
-		Scheme:        scheme,
-		MetricsWatcher: NewMetricsWatcher(metricsClient),
+		Scheme:         scheme,
+		MetricsWatcher: NewMetricsWatcher(metricsClient, kubeClient),
 	}
 }
 
@@ -69,7 +70,7 @@ func (r *SelfRemediationPolicyReconciler) Reconcile(ctx context.Context, req ctr
 		var deployment appsv1.Deployment
 		if err := r.Get(ctx, client.ObjectKey{
 			Namespace: policy.Namespace,
-			Name:     rule.Actions[0].Target.Name,
+			Name:      rule.Actions[0].Target.Name,
 		}, &deployment); err != nil {
 			log.Error(err, "failed to get deployment")
 			continue
@@ -159,7 +160,7 @@ func (r *SelfRemediationPolicyReconciler) scheduleReversion(deployment *appsv1.D
 	var currentDeployment appsv1.Deployment
 	if err := r.Get(ctx, client.ObjectKey{
 		Namespace: deployment.Namespace,
-		Name:     deployment.Name,
+		Name:      deployment.Name,
 	}, &currentDeployment); err != nil {
 		return
 	}

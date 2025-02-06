@@ -14,7 +14,7 @@ rules:
   verbs: ["get", "list", "watch"]
 - apiGroups: [""]
   resources: ["events"]
-  verbs: ["create", "patch"]
+  verbs: ["create", "patch", "update"]
 
 # Workload access - read-only for most, update for specific resources
 - apiGroups: ["apps"]
@@ -65,7 +65,7 @@ webhooks:
     scope: "Namespaced"
   clientConfig:
     service:
-      namespace: kubemedic-system
+      namespace: kubemedic
       name: kubemedic-webhook-service
       path: "/validate"
   admissionReviewVersions: ["v1"]
@@ -78,7 +78,7 @@ apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
   name: kubemedic-leader-election-role
-  namespace: kubemedic-system
+  namespace: kubemedic
 rules:
 - apiGroups: [""]
   resources: ["configmaps"]
@@ -95,7 +95,7 @@ apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
   name: kubemedic-leader-election-rolebinding
-  namespace: kubemedic-system
+  namespace: kubemedic
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: Role
@@ -103,7 +103,7 @@ roleRef:
 subjects:
 - kind: ServiceAccount
   name: kubemedic-controller
-  namespace: kubemedic-system
+  namespace: kubemedic
 
 ---
 apiVersion: rbac.authorization.k8s.io/v1
@@ -117,4 +117,4 @@ roleRef:
 subjects:
 - kind: ServiceAccount
   name: kubemedic-controller
-  namespace: kubemedic-system
+  namespace: kubemedic

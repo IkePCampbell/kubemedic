@@ -1,0 +1,155 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.16.1
+  name: remediationbackups.remediation.kubemedic.io
+spec:
+  group: remediation.kubemedic.io
+  names:
+    kind: RemediationBackup
+    listKind: RemediationBackupList
+    plural: remediationbackups
+    singular: remediationbackup
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    - jsonPath: .status.isValid
+      name: Valid
+      type: boolean
+    - jsonPath: .spec.resourceRef.kind
+      name: Resource
+      type: string
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: RemediationBackup is the Schema for the remediationbackups API
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: RemediationBackupSpec defines the desired state of RemediationBackup
+            properties:
+              actionType:
+                description: Type of remediation action taken
+                type: string
+              backupTime:
+                description: Timestamp when the backup was created
+                format: date-time
+                type: string
+              originalAnnotations:
+                additionalProperties:
+                  type: string
+                description: Annotations from the original resource
+                type: object
+              originalLabels:
+                additionalProperties:
+                  type: string
+                description: Labels from the original resource
+                type: object
+              originalState:
+                description: Original state of the resource before remediation
+                type: object
+                x-kubernetes-preserve-unknown-fields: true
+              policyRef:
+                description: Reference to the remediation policy that triggered the
+                  action
+                properties:
+                  apiGroup:
+                    description: API Group of the resource
+                    type: string
+                  kind:
+                    description: Kind of the resource
+                    type: string
+                  name:
+                    description: Name of the resource
+                    type: string
+                  namespace:
+                    description: Namespace of the resource
+                    type: string
+                required:
+                - apiGroup
+                - kind
+                - name
+                - namespace
+                type: object
+              resourceRef:
+                description: Reference to the remediated resource
+                properties:
+                  apiGroup:
+                    description: API Group of the resource
+                    type: string
+                  kind:
+                    description: Kind of the resource
+                    type: string
+                  name:
+                    description: Name of the resource
+                    type: string
+                  namespace:
+                    description: Namespace of the resource
+                    type: string
+                required:
+                - apiGroup
+                - kind
+                - name
+                - namespace
+                type: object
+              ttl:
+                description: Time to live for this backup
+                type: string
+            required:
+            - actionType
+            - backupTime
+            - originalState
+            - policyRef
+            - resourceRef
+            type: object
+          status:
+            description: RemediationBackupStatus defines the observed state of RemediationBackup
+            properties:
+              backupSizeBytes:
+                description: Size of the backup in bytes
+                format: int64
+                type: integer
+              contentHash:
+                description: Hash of the backup content for integrity verification
+                type: string
+              isValid:
+                description: Whether this backup can be used for rollback
+                type: boolean
+              lastValidationTime:
+                description: Last time the backup was validated
+                format: date-time
+                type: string
+              validationErrors:
+                description: Any validation errors
+                items:
+                  type: string
+                type: array
+            required:
+            - isValid
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}

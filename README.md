@@ -10,12 +10,82 @@ KubeMedic is a Kubernetes operator that safely automates common remediation task
   ```bash
   kubectl apply -f https://github.com/kubernetes-sigs/metrics-server/releases/latest/download/components.yaml
   ```
+- [cert-manager](https://cert-manager.io/docs/installation/) for managing TLS certificates (optional, but recommended for webhook)
+  ```bash
+  kubectl apply -f https://github.com/cert-manager/cert-manager/releases/latest/download/cert-manager.yaml
+  ```
 
 ### Optional
 - Prometheus & Grafana for advanced metrics visualization
   - KubeMedic works with the native Kubernetes metrics API by default
   - Can be integrated with Prometheus for historical data and advanced querying
   - Grafana dashboards available for visualization
+
+## Webhook Configuration
+
+### Using cert-manager
+1. Install cert-manager in your cluster.
+2. Configure a `Certificate` resource for the webhook service.
+3. Update the `ValidatingWebhookConfiguration` to use the cert-manager managed CA.
+
+### Bring Your Own CA Bundle
+1. Generate a CA certificate and key using OpenSSL:
+   ```bash
+   openssl req -x509 -newkey rsa:4096 -keyout tls.key -out tls.crt -days 365 -nodes -subj "/CN=kubemedic-webhook.kubemedic.svc"
+   ```
+
+2. Create a Kubernetes secret to store the certificate and key:
+   ```bash
+   kubectl create secret tls kubemedic-webhook-cert --cert=tls.crt --key=tls.key -n kubemedic
+   ```
+
+3. Encode the CA certificate in base64:
+   ```bash
+   cat tls.crt | base64 | tr -d '\n'
+   ```
+
+4. Update the `ValidatingWebhookConfiguration` with the base64-encoded CA bundle:
+   ```yaml
+   apiVersion: admissionregistration.k8s.io/v1
+   kind: ValidatingWebhookConfiguration
+   metadata:
+     name: kubemedic-validating-webhook
+   webhooks:
+   - name: validate.remediation.kubemedic.io
+     clientConfig:
+       service:
+         name: kubemedic-webhook
+         namespace: kubemedic
+         path: "/validate"
+       caBundle: "<BASE64_ENCODED_CERTIFICATE>"
+     rules:
+     - operations: ["CREATE", "UPDATE"]
+       apiGroups: ["remediation.kubemedic.io"]
+       apiVersions: ["v1alpha1"]
+       resources: ["selfremediationpolicies"]
+     failurePolicy: Fail
+     sideEffects: None
+     admissionReviewVersions: ["v1"]
+   ```
+
+### Automating caBundle Update from a Secret
+
+You can automate the process of updating the `caBundle` in the `ValidatingWebhookConfiguration` using the following script:
+
+```bash
+#!/bin/bash
+
+# Retrieve the CA certificate from the Secret
+CA_CERT=$(kubectl get secret kubemedic-webhook-cert -n kubemedic -o jsonpath='{.data.tls\.crt}' | base64 --decode)
+
+# Base64 encode the CA certificate
+CA_BUNDLE=$(echo "$CA_CERT" | base64 | tr -d '\n')
+
+# Update the ValidatingWebhookConfiguration with the CA bundle
+kubectl patch validatingwebhookconfiguration kubemedic-validating-webhook --type='json' -p="[{\"op\": \"replace\", \"path\": \"/webhooks/0/clientConfig/caBundle\", \"value\":\"$CA_BUNDLE\"}]"
+```
+
+Run this script after deploying your webhook and creating the Secret to update the `caBundle` automatically.
 
 ## Key Features
 
@@ -217,3 +287,54 @@ monitoring:
 ## License
 
 Apache License 2.0 - See [LICENSE](LICENSE) for details.
+
+- Built with Go, Kubernetes APIs, and controller-runtime using operator-sdk
+
+## What Others Do
+
+In the Kubernetes ecosystem, several tools are commonly used to manage and optimize cluster operations:
+
+- **Cluster Autoscaler:** Automatically adjusts the number of nodes in a cluster based on resource usage. It focuses on infrastructure-level scaling, ensuring that there are enough nodes to handle the workload.
+
+- **Helm:** A package manager for Kubernetes that simplifies the deployment and management of applications. It helps in managing application lifecycles and dependencies.
+
+- **Argo CD:** A declarative, GitOps continuous delivery tool for Kubernetes. It automates the deployment of applications and ensures that the live state of the cluster matches the desired state defined in Git.
+
+While these tools provide essential functionalities for managing Kubernetes clusters, KubeMedic goes a step further by focusing on application-level remediation. It automates responses to specific conditions within the cluster, such as high CPU usage or error rates, by executing predefined actions like scaling or restarting pods.
+
+### Combining KubeMedic with Other Tools
+
+KubeMedic can be effectively combined with other Kubernetes tools to enhance cluster management:
+
+- **With Cluster Autoscaler:** Use KubeMedic to handle application-level scaling and remediation, while the Cluster Autoscaler manages node-level scaling. This ensures that both application performance and infrastructure efficiency are optimized.
+
+- **With Helm:** Deploy KubeMedic and its policies using Helm charts for easy management and versioning. Helm can also be used to manage the lifecycle of applications that KubeMedic monitors.
+
+- **With Argo CD:** Use Argo CD to manage the GitOps workflow for KubeMedic policies. This ensures that any changes to remediation strategies are tracked and versioned in Git, providing a clear audit trail and facilitating rollbacks if necessary.
+
+By integrating KubeMedic with these tools, you can achieve a comprehensive and automated approach to managing both application and infrastructure health in your Kubernetes clusters.
+
+## Components and Images
+
+KubeMedic is composed of several components, each packaged as a separate Docker image. Here's a breakdown of these components and their roles:
+
+1. **Controller Manager:**
+   - **Image:** `kubemedic-controller-manager`
+   - **Role:** This is the core component of the operator. It runs the reconciliation loops that manage the state of the cluster based on the custom resources (CRDs) defined by KubeMedic. It interacts with the Kubernetes API to monitor resources and apply remediation actions as specified in the policies.
+
+2. **Webhook Server:**
+   - **Image:** `kubemedic-webhook`
+   - **Role:** This component handles admission webhooks, which are used to validate or mutate Kubernetes resources during their creation or update. The webhook server ensures that the custom resources conform to the expected schema and business logic before they are persisted in the cluster.
+
+3. **Metrics or Auxiliary Services:**
+   - **Image:** This could be another image if there are additional services like a metrics server or a separate component for handling specific tasks.
+   - **Role:** These services might be responsible for collecting metrics, providing dashboards, or handling specific integrations (e.g., with Prometheus or Grafana).
+
+### Why Multiple Images?
+
+- **Separation of Concerns:** Each component has a distinct responsibility, allowing for better organization and maintainability.
+- **Scalability:** Components can be scaled independently based on their resource requirements and load.
+- **Security and Stability:** Isolating components reduces the risk of a single point of failure and allows for more granular security policies.
+- **Flexibility:** Different components can be updated or replaced independently, facilitating continuous integration and deployment.
+
+By understanding the roles of each component and managing them effectively, you can ensure that your Kubernetes operator functions smoothly and efficiently.

@@ -137,4 +137,4 @@ spec:
 #      -- /bin/sh -c 'echo "0" > /tmp/control/error_rate'
 #
 # 8. Clean up:
-#    kubectl delete -f pod-restart-with-test.yaml 
+#    kubectl delete -f pod-restart-with-test.yaml

@@ -1,0 +1,408 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kubemedic-controller-manager
+  namespace: kubemedic
+  labels:
+    app.kubernetes.io/name: kubemedic
+    app.kubernetes.io/component: controller
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: kubemedic
+      app.kubernetes.io/component: controller
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: kubemedic
+        app.kubernetes.io/component: controller
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+      - name: manager
+        image: ghcr.io/ikepcampbell/kubemedic-controller:latest
+        imagePullPolicy: IfNotPresent
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+            - ALL
+          runAsNonRoot: true
+          seccompProfile:
+            type: RuntimeDefault
+        ports:
+        - containerPort: 9443
+          name: webhook
+          protocol: TCP
+        - containerPort: 8080
+          name: metrics
+          protocol: TCP
+        command:
+        - /manager
+        args:
+        - --leader-elect
+        - --metrics-bind-address=:8080
+        - --health-probe-bind-address=:8081
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: 8081
+            scheme: HTTP
+          initialDelaySeconds: 15
+          periodSeconds: 20
+        readinessProbe:
+          httpGet:
+            path: /readyz
+            port: 8081
+            scheme: HTTP
+          initialDelaySeconds: 5
+          periodSeconds: 10
+        resources:
+          limits:
+            cpu: 200m
+            memory: 128Mi
+          requests:
+            cpu: 100m
+            memory: 64Mi
+      serviceAccountName: kubemedic-controller
+      imagePullSecrets:
+      - name: ghcr-secret
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kubemedic-webhook
+  namespace: kubemedic
+  labels:
+    app.kubernetes.io/name: kubemedic
+    app.kubernetes.io/component: webhook
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: kubemedic
+      app.kubernetes.io/component: webhook
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: kubemedic
+        app.kubernetes.io/component: webhook
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+      - name: webhook
+        image: ghcr.io/ikepcampbell/kubemedic-webhook:latest
+        imagePullPolicy: IfNotPresent
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+            - ALL
+          runAsNonRoot: true
+          seccompProfile:
+            type: RuntimeDefault
+        ports:
+        - containerPort: 8443
+          name: webhook
+          protocol: TCP
+        command:
+        - /webhook
+        args:
+        - --tls-cert-file=/etc/webhook/certs/tls.crt
+        - --tls-private-key-file=/etc/webhook/certs/tls.key
+        volumeMounts:
+        - name: webhook-certs
+          mountPath: /etc/webhook/certs
+          readOnly: true
+        resources:
+          limits:
+            cpu: 100m
+            memory: 128Mi
+          requests:
+            cpu: 50m
+            memory: 64Mi
+      volumes:
+      - name: webhook-certs
+        secret:
+          secretName: kubemedic-webhook-cert
+      serviceAccountName: kubemedic-webhook
+      imagePullSecrets:
+      - name: ghcr-secret
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: kubemedic-controller-manager
+  namespace: kubemedic
+  labels:
+    app.kubernetes.io/name: kubemedic
+    app.kubernetes.io/component: controller
+spec:
+  ports:
+  - port: 443
+    targetPort: 9443
+    protocol: TCP
+    name: webhook
+  - port: 8080
+    targetPort: 8080
+    protocol: TCP
+    name: metrics
+  selector:
+    app.kubernetes.io/name: kubemedic
+    app.kubernetes.io/component: controller
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: kubemedic-webhook-service
+  namespace: kubemedic
+  labels:
+    app.kubernetes.io/name: kubemedic
+    app.kubernetes.io/component: webhook
+spec:
+  ports:
+  - port: 443
+    targetPort: 8443
+    protocol: TCP
+    name: webhook
+  - port: 8080
+    targetPort: 8080
+    protocol: TCP
+    name: metrics
+  selector:
+    app.kubernetes.io/name: kubemedic
+    app.kubernetes.io/component: webhook
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: kubemedic-controller-role
+rules:
+- apiGroups: [""]
+  resources: ["pods", "services", "endpoints", "persistentvolumeclaims"]
+  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+- apiGroups: ["apps"]
+  resources: ["deployments", "daemonsets", "replicasets", "statefulsets"]
+  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+- apiGroups: ["autoscaling"]
+  resources: ["horizontalpodautoscalers"]
+  verbs: ["get", "list", "watch", "update"]
+- apiGroups: ["batch"]
+  resources: ["jobs", "cronjobs"]
+  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+- apiGroups: ["coordination.k8s.io"]
+  resources: ["leases"]
+  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+- apiGroups: ["remediation.kubemedic.io"]
+  resources: ["selfremediationpolicies"]
+  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: kubemedic-controller-rolebinding
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: kubemedic-controller-role
+subjects:
+- kind: ServiceAccount
+  name: kubemedic-controller
+  namespace: kubemedic
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: kubemedic-controller
+  namespace: kubemedic
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: kubemedic-webhook
+  namespace: kubemedic
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingWebhookConfiguration
+metadata:
+  name: kubemedic-validating-webhook
+webhooks:
+- name: validate.remediation.kubemedic.io
+  clientConfig:
+    service:
+      name: kubemedic-webhook
+      namespace: kubemedic
+      path: "/validate"
+    #caBundle: "REPLACE_WITH_CA"
+  rules:
+  - operations: ["CREATE", "UPDATE"]
+    apiGroups: ["remediation.kubemedic.io"]
+    apiVersions: ["v1alpha1"]
+    resources: ["selfremediationpolicies"]
+  failurePolicy: Fail
+  sideEffects: None
+  admissionReviewVersions: ["v1"]
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: selfremediationpolicies.remediation.kubemedic.io
+spec:
+  group: remediation.kubemedic.io
+  names:
+    kind: SelfRemediationPolicy
+    listKind: SelfRemediationPolicyList
+    plural: selfremediationpolicies
+    singular: selfremediationpolicy
+  scope: Namespaced
+  versions:
+  - name: v1alpha1
+    served: true
+    storage: true
+    schema:
+      openAPIV3Schema:
+        description: SelfRemediationPolicy is the Schema for the selfremediationpolicies API
+        type: object
+        properties:
+          apiVersion:
+            description: 'APIVersion defines the versioned schema of this representation of an object.'
+            type: string
+          kind:
+            description: 'Kind is a string value representing the REST resource this object represents.'
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: SelfRemediationPolicySpec defines the desired state
+            type: object
+            required:
+              - rules
+            properties:
+              rules:
+                description: Rules for remediation
+                type: array
+                items:
+                  type: object
+                  required:
+                    - name
+                    - conditions
+                    - actions
+                  properties:
+                    name:
+                      description: Name of the rule
+                      type: string
+                    conditions:
+                      description: Conditions that trigger the rule
+                      type: array
+                      items:
+                        type: object
+                        required:
+                          - type
+                          - threshold
+                        properties:
+                          type:
+                            description: Type of condition to monitor
+                            type: string
+                          threshold:
+                            description: Threshold value as a string
+                            type: string
+                          duration:
+                            description: Duration the condition must be true
+                            type: string
+                    actions:
+                      description: Actions to take when conditions are met
+                      type: array
+                      items:
+                        type: object
+                        required:
+                          - type
+                        properties:
+                          type:
+                            description: Type of action to take
+                            type: string
+                          target:
+                            description: Target resource for the action
+                            type: object
+                            required:
+                              - kind
+                              - name
+                            properties:
+                              kind:
+                                description: Kind of the target resource
+                                type: string
+                              name:
+                                description: Name of the target resource
+                                type: string
+                              namespace:
+                                description: Namespace of the target resource
+                                type: string
+              cooldownPeriod:
+                description: CooldownPeriod between remediation actions
+                type: string
+              grafanaIntegration:
+                description: GrafanaIntegration configuration
+                type: object
+                required:
+                  - enabled
+                properties:
+                  enabled:
+                    description: Whether Grafana integration is enabled
+                    type: boolean
+                  webhookUrl:
+                    description: Webhook URL for Grafana alerts
+                    type: string
+          status:
+            description: SelfRemediationPolicyStatus defines the observed state
+            type: object
+            properties:
+              lastEvaluationTime:
+                description: Last time the policy was evaluated
+                format: date-time
+                type: string
+              lastRemediationAction:
+                description: Last remediation action taken
+                type: string
+              state:
+                description: Current state of the policy
+                type: string
+---
+apiVersion: remediation.kubemedic.io/v1alpha1
+kind: SelfRemediationPolicy
+metadata:
+  name: webhook-restart-policy
+  namespace: kubemedic
+spec:
+  rules:
+    - name: webhook-restart
+      conditions:
+        - type: PodRestarts
+          threshold: "1"
+          duration: "5m"
+      actions:
+        - type: RestartPod
+          target:
+            kind: Pod
+            namespace: kubemedic
+            name: kubemedic-webhook
+    - name: repeated-failures
+      conditions:
+        - type: ErrorRate
+          threshold: "5"
+          duration: "1m"
+      actions:
+        - type: RollbackDeployment
+          target:
+            kind: Deployment
+            namespace: kubemedic
+            name: kubemedic-webhook
+  cooldownPeriod: "2m"
+  grafanaIntegration:
+    enabled: false

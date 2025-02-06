@@ -37,7 +37,7 @@ helm repo update
 
 # Install KubeMedic
 helm install kubemedic kubemedic/kubemedic \
-  --namespace kubemedic-system \
+  --namespace kubemedic \
   --create-namespace
 ```
 
@@ -59,7 +59,7 @@ make deploy IMG=ghcr.io/ikepcampbell/kubemedic:latest
 
 1. Check if the operator pod is running:
 ```bash
-kubectl get pods -n kubemedic-system
+kubectl get pods -n kubemedic
 ```
 
 Expected output:
@@ -80,7 +80,7 @@ selfremediationpolicies.remediation.kubemedic.io   2024-02-05T12:00:00Z
 
 3. Check operator logs:
 ```bash
-kubectl logs -n kubemedic-system deployment/kubemedic-controller-manager
+kubectl logs -n kubemedic deployment/kubemedic-controller-manager
 ```
 
 ## Configuration
@@ -107,7 +107,7 @@ If using Helm:
 ```bash
 helm upgrade kubemedic kubemedic/kubemedic \
   -f values.yaml \
-  --namespace kubemedic-system
+  --namespace kubemedic
 ```
 
 ## Next Steps
@@ -128,7 +128,7 @@ kubectl apply -f config/crd/bases/ --force
 
 2. Operator pod not starting:
 ```bash
-kubectl describe pod -n kubemedic-system kubemedic-controller-manager-xxxxx
+kubectl describe pod -n kubemedic kubemedic-controller-manager-xxxxx
 ```
 
 3. RBAC issues:
@@ -154,5 +154,5 @@ kubectl delete -f https://raw.githubusercontent.com/ikepcampbell/kubemedic/main/
 
 ### Using Helm:
 ```bash
-helm uninstall kubemedic -n kubemedic-system
+helm uninstall kubemedic -n kubemedic
 ``` 

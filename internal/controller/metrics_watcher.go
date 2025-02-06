@@ -6,21 +6,26 @@ import (
     "time"
     
     metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+    "k8s.io/client-go/kubernetes"
+    metricsv1beta1 "k8s.io/metrics/pkg/apis/metrics/v1beta1"
     "k8s.io/metrics/pkg/client/clientset/versioned"
 )
 
 type MetricsWatcher struct {
     metricsClient *versioned.Clientset
+    kubeClient    *kubernetes.Clientset
 }
 
-func NewMetricsWatcher(metricsClient *versioned.Clientset) *MetricsWatcher {
+func NewMetricsWatcher(metricsClient *versioned.Clientset, kubeClient *kubernetes.Clientset) *MetricsWatcher {
     return &MetricsWatcher{
         metricsClient: metricsClient,
+        kubeClient:    kubeClient,
     }
 }
 
 func (w *MetricsWatcher) GetPodCPUUsage(ctx context.Context, namespace, podName string) (float64, error) {
-    metrics, err := w.metricsClient.MetricsV1beta1().PodMetrics(namespace).Get(ctx, podName, metav1.GetOptions{})
+    var podMetrics *metricsv1beta1.PodMetrics
+    podMetrics, err := w.metricsClient.MetricsV1beta1().PodMetricses(namespace).Get(ctx, podName, metav1.GetOptions{})
     if err != nil {
         return 0, fmt.Errorf("failed to get pod metrics: %v", err)
     }
@@ -28,13 +33,13 @@ func (w *MetricsWatcher) GetPodCPUUsage(ctx context.Context, namespace, podName 
     var totalCPUUsage int64
     var totalCPULimit int64
 
-    for _, container := range metrics.Containers {
+    for _, container := range podMetrics.Containers {
         cpuUsage := container.Usage.Cpu().MilliValue()
         totalCPUUsage += cpuUsage
     }
 
     // Get the pod to find CPU limits
-    pod, err := w.metricsClient.CoreV1().Pods(namespace).Get(ctx, podName, metav1.GetOptions{})
+    pod, err := w.kubeClient.CoreV1().Pods(namespace).Get(ctx, podName, metav1.GetOptions{})
     if err != nil {
         return 0, fmt.Errorf("failed to get pod: %v", err)
     }

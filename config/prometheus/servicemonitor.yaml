@@ -2,7 +2,7 @@ apiVersion: monitoring.coreos.com/v1
 kind: ServiceMonitor
 metadata:
   name: kubemedic-metrics
-  namespace: kubemedic-system
+  namespace: kubemedic
   labels:
     app.kubernetes.io/name: kubemedic
     app.kubernetes.io/instance: kubemedic
@@ -16,4 +16,4 @@ spec:
     path: /metrics
   namespaceSelector:
     matchNames:
-    - kubemedic-system 
+    - kubemedic 

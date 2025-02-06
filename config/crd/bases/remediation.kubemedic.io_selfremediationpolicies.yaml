@@ -65,6 +65,39 @@ spec:
                       items:
                         description: Action defines what remediation to take
                         properties:
+                          conflictResolution:
+                            description: ConflictResolution defines how to handle
+                              conflicts with other controllers
+                            type: string
+                          postActionHook:
+                            description: PostActionHook webhook to call after taking
+                              action
+                            type: string
+                          preActionHook:
+                            description: PreActionHook webhook to call before taking
+                              action
+                            type: string
+                          scalingParams:
+                            description: ScalingParams for detailed scaling configuration
+                            properties:
+                              notificationWebhook:
+                                description: NotificationWebhook for sending scaling
+                                  decisions
+                                type: string
+                              revertStrategy:
+                                description: RevertStrategy defines how to revert
+                                  changes (Gradual or Immediate)
+                                type: string
+                              scalingDuration:
+                                description: Duration for how long to maintain the
+                                  temporary scaling
+                                type: string
+                              temporaryMaxReplicas:
+                                description: TemporaryMaxReplicas allows temporary
+                                  override of HPA/Argo maxReplicas
+                                format: int32
+                                type: integer
+                            type: object
                           target:
                             description: Target resource for the action
                             properties:
