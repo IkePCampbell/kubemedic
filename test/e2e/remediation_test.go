@@ -5,16 +5,198 @@ import (
 	"testing"
 	"time"
 
+	. "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/utils/pointer"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 
 	remediationv1alpha1 "github.com/ikepcampbell/kubemedic/api/v1alpha1"
 )
+
+var _ = Describe("Remediation Policy", func() {
+	ctx := context.Background()
+	logger := zap.New(zap.WriteTo(GinkgoWriter))
+	log.SetLogger(logger)
+
+	const (
+		testNamespace  = "test-remediation"
+		deploymentName = "test-app"
+		policyName     = "test-policy"
+		timeout        = time.Second * 30
+		interval       = time.Second * 1
+	)
+
+	BeforeEach(func() {
+		// Create test namespace
+		ns := &corev1.Namespace{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: testNamespace,
+			},
+		}
+		Expect(k8sClient.Create(ctx, ns)).Should(Succeed())
+
+		logger.Info("Created test namespace", "namespace", testNamespace)
+	})
+
+	AfterEach(func() {
+		// Cleanup
+		ns := &corev1.Namespace{}
+		err := k8sClient.Get(ctx, types.NamespacedName{Name: testNamespace}, ns)
+		if err == nil {
+			Expect(k8sClient.Delete(ctx, ns)).Should(Succeed())
+			logger.Info("Cleaned up test namespace", "namespace", testNamespace)
+		}
+	})
+
+	It("should scale up deployment when CPU usage exceeds threshold", func() {
+		By("Creating a test deployment")
+		deployment := &appsv1.Deployment{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      deploymentName,
+				Namespace: testNamespace,
+			},
+			Spec: appsv1.DeploymentSpec{
+				Replicas: pointer.Int32(1),
+				Selector: &metav1.LabelSelector{
+					MatchLabels: map[string]string{
+						"app": "test-app",
+					},
+				},
+				Template: corev1.PodTemplateSpec{
+					ObjectMeta: metav1.ObjectMeta{
+						Labels: map[string]string{
+							"app": "test-app",
+						},
+					},
+					Spec: corev1.PodSpec{
+						Containers: []corev1.Container{
+							{
+								Name:    "test-container",
+								Image:   "busybox",
+								Command: []string{"/bin/sh", "-c", "while true; do echo 'consuming CPU'; done"},
+								Resources: corev1.ResourceRequirements{
+									Limits: corev1.ResourceList{
+										corev1.ResourceCPU:    resource.MustParse("200m"),
+										corev1.ResourceMemory: resource.MustParse("128Mi"),
+									},
+									Requests: corev1.ResourceList{
+										corev1.ResourceCPU:    resource.MustParse("100m"),
+										corev1.ResourceMemory: resource.MustParse("64Mi"),
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		}
+		Expect(k8sClient.Create(ctx, deployment)).Should(Succeed())
+		logger.Info("Created test deployment", "name", deploymentName)
+
+		By("Creating a remediation policy")
+		policy := &remediationv1alpha1.SelfRemediationPolicy{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      policyName,
+				Namespace: testNamespace,
+			},
+			Spec: remediationv1alpha1.SelfRemediationPolicySpec{
+				Rules: []remediationv1alpha1.Rule{
+					{
+						Name: "cpu-scaling",
+						Conditions: []remediationv1alpha1.Condition{
+							{
+								Type:      remediationv1alpha1.CPUUsage,
+								Threshold: "80",
+								Duration:  "10s",
+							},
+						},
+						Actions: []remediationv1alpha1.Action{
+							{
+								Type: remediationv1alpha1.ScaleUp,
+								Target: remediationv1alpha1.Target{
+									Kind:      "Deployment",
+									Name:      deploymentName,
+									Namespace: testNamespace,
+								},
+								ScalingParams: &remediationv1alpha1.ScalingParameters{
+									TemporaryMaxReplicas: pointer.Int32(3),
+									ScalingDuration:      "1m",
+									RevertStrategy:       "Immediate",
+								},
+							},
+						},
+					},
+				},
+				CooldownPeriod: "30s",
+			},
+		}
+		Expect(k8sClient.Create(ctx, policy)).Should(Succeed())
+		logger.Info("Created remediation policy", "name", policyName)
+
+		By("Waiting for deployment to be ready")
+		Eventually(func() bool {
+			var dep appsv1.Deployment
+			err := k8sClient.Get(ctx, types.NamespacedName{
+				Name:      deploymentName,
+				Namespace: testNamespace,
+			}, &dep)
+			if err != nil {
+				logger.Error(err, "Failed to get deployment")
+				return false
+			}
+			return dep.Status.ReadyReplicas == *dep.Spec.Replicas
+		}, timeout, interval).Should(BeTrue())
+
+		By("Simulating high CPU usage")
+		// In a real test, you would use metrics-server to simulate high CPU usage
+		// For this example, we'll just verify the policy validation and action execution
+
+		By("Verifying policy triggers scaling action")
+		Eventually(func() int32 {
+			var dep appsv1.Deployment
+			err := k8sClient.Get(ctx, types.NamespacedName{
+				Name:      deploymentName,
+				Namespace: testNamespace,
+			}, &dep)
+			if err != nil {
+				logger.Error(err, "Failed to get deployment")
+				return 0
+			}
+			logger.Info("Current deployment status",
+				"replicas", *dep.Spec.Replicas,
+				"ready_replicas", dep.Status.ReadyReplicas,
+			)
+			return *dep.Spec.Replicas
+		}, timeout, interval).Should(BeNumerically(">", 1))
+
+		By("Verifying scaling reversion")
+		Eventually(func() int32 {
+			var dep appsv1.Deployment
+			err := k8sClient.Get(ctx, types.NamespacedName{
+				Name:      deploymentName,
+				Namespace: testNamespace,
+			}, &dep)
+			if err != nil {
+				logger.Error(err, "Failed to get deployment")
+				return 0
+			}
+			logger.Info("Current deployment status after reversion",
+				"replicas", *dep.Spec.Replicas,
+				"ready_replicas", dep.Status.ReadyReplicas,
+			)
+			return *dep.Spec.Replicas
+		}, time.Minute*2, interval).Should(Equal(int32(1)))
+	})
+})
 
 func TestEndToEndRemediation(t *testing.T) {
 	ctx := context.Background()

@@ -219,3 +219,23 @@ If you can't resolve the issue:
    - Kubernetes version
    - KubeMedic version
    - Steps to reproduce 
+
+   ### 4. Stuck Namespace Deletion
+
+   If the KubeMedic namespace is stuck in "Terminating" state during deletion:
+
+   1. Start the kubectl proxy in a separate terminal:
+   ```bash
+   kubectl proxy
+   ```
+
+   2. Run this command to force namespace finalization:
+   ```bash
+   kubectl get ns NAMESPACE -o json | \
+     jq '.spec.finalizers=[]' | \
+     curl -X PUT http://localhost:8001/api/v1/namespaces/NAMESPACE/finalize \
+     -H "Content-Type: application/json" \
+     --data @-
+   ```
+
+   This will remove any finalizers blocking the namespace deletion and allow it to complete.

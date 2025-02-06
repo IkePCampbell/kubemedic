@@ -124,7 +124,7 @@ spec:
     spec:
       containers:
       - name: webhook
-        image: ${WEBHOOK_IMAGE}
+        image: ghcr.io/ikepcampbell/kubemedic-webhook:latest
         imagePullPolicy: IfNotPresent
         ports:
         - containerPort: 8443

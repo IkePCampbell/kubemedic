@@ -11,6 +11,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 
 	remediationv1alpha1 "kubemedic/api/v1alpha1"
@@ -24,17 +25,28 @@ type KubeMedicValidator struct {
 
 // Handle validates SelfRemediationPolicy resources
 func (v *KubeMedicValidator) Handle(ctx context.Context, req admission.Request) admission.Response {
-	policy := &remediationv1alpha1.SelfRemediationPolicy{}
+	log := log.FromContext(ctx).WithValues(
+		"webhook", "validator",
+		"namespace", req.Namespace,
+		"name", req.Name,
+		"operation", req.Operation,
+	)
 
-	err := v.decoder.DecodeRaw(req.Object, policy)
+	log.Info("Handling admission request")
+
+	policy := &remediationv1alpha1.SelfRemediationPolicy{}
+	err := v.decoder.Decode(req, policy)
 	if err != nil {
+		log.Error(err, "Failed to decode admission request")
 		return admission.Errored(http.StatusBadRequest, err)
 	}
 
 	if err := v.validatePolicy(ctx, policy); err != nil {
+		log.Error(err, "Policy validation failed")
 		return admission.Denied(err.Error())
 	}
 
+	log.Info("Policy validation successful")
 	return admission.Allowed("")
 }
 
@@ -49,18 +61,34 @@ func (v *KubeMedicValidator) InjectDecoder(d *admission.Decoder) error {
 
 // validatePolicy validates all aspects of the policy
 func (v *KubeMedicValidator) validatePolicy(ctx context.Context, policy *remediationv1alpha1.SelfRemediationPolicy) error {
+	log := log.FromContext(ctx).WithValues(
+		"policy_name", policy.Name,
+		"rules_count", len(policy.Spec.Rules),
+	)
+
+	log.V(1).Info("Starting policy validation")
+
 	if err := v.validateNamespace(ctx, policy); err != nil {
+		log.Error(err, "Namespace validation failed")
 		return err
 	}
 
 	if err := v.validateResources(ctx, policy); err != nil {
+		log.Error(err, "Resource validation failed")
 		return err
 	}
 
 	if err := v.validateActions(ctx, policy); err != nil {
+		log.Error(err, "Action validation failed")
 		return err
 	}
 
+	if err := v.validateSafetyLimits(ctx, policy); err != nil {
+		log.Error(err, "Safety limits validation failed")
+		return err
+	}
+
+	log.Info("Policy validation completed successfully")
 	return nil
 }
 
@@ -122,25 +150,42 @@ func (v *KubeMedicValidator) validateResources(ctx context.Context, policy *reme
 }
 
 func (v *KubeMedicValidator) validateActions(ctx context.Context, policy *remediationv1alpha1.SelfRemediationPolicy) error {
-	allowedActions := map[remediationv1alpha1.ActionType]bool{
-		remediationv1alpha1.ScaleUp:            true,
-		remediationv1alpha1.ScaleDown:          true,
-		remediationv1alpha1.RestartPod:         true,
-		remediationv1alpha1.RollbackDeployment: true,
-		remediationv1alpha1.UpdateResources:    true,
-		remediationv1alpha1.AdjustHPALimits:    true,
-	}
+	log := log.FromContext(ctx)
 
 	for _, rule := range policy.Spec.Rules {
-		for _, action := range rule.Actions {
-			if !allowedActions[action.Type] {
-				return fmt.Errorf("action type %s is not allowed", action.Type)
-			}
+		ruleLog := log.WithValues(
+			"rule_name", rule.Name,
+			"actions_count", len(rule.Actions),
+		)
 
-			// Validate action-specific parameters
+		for _, action := range rule.Actions {
+			actionLog := ruleLog.WithValues(
+				"action_type", action.Type,
+				"target_kind", action.Target.Kind,
+				"target_name", action.Target.Name,
+			)
+
+			actionLog.V(1).Info("Validating action")
+
 			if err := v.validateActionParams(action); err != nil {
+				actionLog.Error(err, "Action parameters validation failed")
 				return err
 			}
+
+			if err := v.validateTargetResource(ctx, action.Target); err != nil {
+				actionLog.Error(err, "Target resource validation failed")
+				return err
+			}
+
+			// For scaling actions, validate quota limits
+			if action.Type == remediationv1alpha1.ScaleUp {
+				if err := v.validateQuotas(ctx, policy); err != nil {
+					actionLog.Error(err, "Quota validation failed")
+					return err
+				}
+			}
+
+			actionLog.V(1).Info("Action validation successful")
 		}
 	}
 

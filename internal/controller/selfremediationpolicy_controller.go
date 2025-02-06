@@ -56,7 +56,11 @@ func NewSelfRemediationPolicyReconciler(
 
 // Reconcile handles the reconciliation loop for SelfRemediationPolicy
 func (r *SelfRemediationPolicyReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
-	log := log.FromContext(ctx)
+	log := log.FromContext(ctx).WithValues(
+		"controller", "selfremediationpolicy",
+		"namespace", req.Namespace,
+		"name", req.Name,
+	)
 
 	// Get the policy
 	var policy remediationv1alpha1.SelfRemediationPolicy
@@ -64,31 +68,62 @@ func (r *SelfRemediationPolicyReconciler) Reconcile(ctx context.Context, req ctr
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
 
+	log.Info("Starting policy reconciliation",
+		"rules_count", len(policy.Spec.Rules),
+		"cooldown_period", policy.Spec.CooldownPeriod,
+	)
+
 	// Process each rule
 	for _, rule := range policy.Spec.Rules {
+		ruleLog := log.WithValues(
+			"rule_name", rule.Name,
+			"conditions_count", len(rule.Conditions),
+			"actions_count", len(rule.Actions),
+		)
+
 		// Get target deployment
 		var deployment appsv1.Deployment
 		if err := r.Get(ctx, client.ObjectKey{
 			Namespace: policy.Namespace,
 			Name:      rule.Actions[0].Target.Name,
 		}, &deployment); err != nil {
-			log.Error(err, "failed to get deployment")
+			ruleLog.Error(err, "Failed to get deployment")
 			continue
 		}
+
+		ruleLog.V(1).Info("Processing deployment",
+			"deployment_name", deployment.Name,
+			"current_replicas", *deployment.Spec.Replicas,
+		)
 
 		// Get pods for the deployment
 		pods := &corev1.PodList{}
 		if err := r.List(ctx, pods, client.InNamespace(policy.Namespace),
 			client.MatchingLabels(deployment.Spec.Selector.MatchLabels)); err != nil {
-			log.Error(err, "failed to list pods")
+			ruleLog.Error(err, "Failed to list pods")
 			continue
 		}
 
+		ruleLog.V(1).Info("Found pods for deployment",
+			"pod_count", len(pods.Items),
+		)
+
 		// Check each pod's metrics
 		for _, pod := range pods.Items {
+			podLog := ruleLog.WithValues(
+				"pod_name", pod.Name,
+				"pod_phase", pod.Status.Phase,
+			)
+
 			for _, condition := range rule.Conditions {
 				threshold, _ := strconv.ParseFloat(condition.Threshold, 64)
 				duration, _ := time.ParseDuration(condition.Duration)
+
+				podLog.V(1).Info("Checking pod metrics",
+					"condition_type", condition.Type,
+					"threshold", threshold,
+					"duration", duration,
+				)
 
 				isOverThreshold, err := r.MetricsWatcher.IsPodOverThreshold(
 					ctx,
@@ -98,14 +133,21 @@ func (r *SelfRemediationPolicyReconciler) Reconcile(ctx context.Context, req ctr
 					duration,
 				)
 				if err != nil {
-					log.Error(err, "failed to check pod metrics")
+					podLog.Error(err, "Failed to check pod metrics")
 					continue
 				}
 
 				if isOverThreshold {
+					podLog.Info("Pod exceeded threshold, executing remediation actions",
+						"condition_type", condition.Type,
+						"current_value", threshold,
+					)
+
 					// Execute remediation actions
 					if err := r.executeActions(ctx, rule.Actions, &deployment); err != nil {
-						log.Error(err, "failed to execute actions")
+						podLog.Error(err, "Failed to execute remediation actions")
+					} else {
+						podLog.Info("Successfully executed remediation actions")
 					}
 				}
 			}
@@ -120,7 +162,17 @@ func (r *SelfRemediationPolicyReconciler) executeActions(
 	actions []remediationv1alpha1.Action,
 	deployment *appsv1.Deployment,
 ) error {
+	log := log.FromContext(ctx)
+
 	for _, action := range actions {
+		actionLog := log.WithValues(
+			"action_type", action.Type,
+			"target_kind", action.Target.Kind,
+			"target_name", action.Target.Name,
+		)
+
+		actionLog.Info("Executing remediation action")
+
 		switch action.Type {
 		case remediationv1alpha1.ScaleUp:
 			if action.ScalingParams == nil || action.ScalingParams.TemporaryMaxReplicas == nil {
@@ -138,7 +190,14 @@ func (r *SelfRemediationPolicyReconciler) executeActions(
 			newReplicas := *action.ScalingParams.TemporaryMaxReplicas
 			deployment.Spec.Replicas = &newReplicas
 
+			actionLog.Info("Scaling up deployment",
+				"original_replicas", *originalReplicas,
+				"new_replicas", newReplicas,
+				"scaling_duration", action.ScalingParams.ScalingDuration,
+			)
+
 			if err := r.Update(ctx, deployment); err != nil {
+				actionLog.Error(err, "Failed to scale deployment")
 				return fmt.Errorf("failed to scale deployment: %v", err)
 			}
 
