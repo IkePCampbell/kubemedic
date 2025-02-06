@@ -1,8 +1,8 @@
 ---
-# KubeMedic Pod Restart Example with Test Application
+# KubeMedic Pod OOM Example with Test Application
 # This example demonstrates:
-# 1. A test application that generates errors at a controlled rate
-# 2. A remediation policy that restarts pods based on error rate
+# 1. A test application that generates memory pressure until OOM
+# 2. A remediation policy that restarts pods based on OOM events
 # 3. Instructions for testing and monitoring
 
 # Test Application Deployment
@@ -25,28 +25,29 @@ spec:
         app: error-test
     spec:
       containers:
-      - name: error-generator
-        image: nginx:alpine
+      - name: memory-hog
+        image: alpine:latest
         ports:
         - containerPort: 8080
         command: ["/bin/sh"]
         args:
           - -c
           - |
-            # Create control file for error rate management
+            # Create control file for memory pressure
             mkdir -p /tmp/control
-            echo "0" > /tmp/control/error_rate
+            echo "0" > /tmp/control/start_oom
 
             while true; do
-              # Read desired error rate (errors per second)
-              RATE=$(cat /tmp/control/error_rate)
+              # Check if we should start memory pressure
+              START=$(cat /tmp/control/start_oom)
               
-              if [ "$RATE" -gt "0" ]; then
-                # Generate errors in nginx error log
-                for i in $(seq 1 $RATE); do
-                  echo "[error] Test error message $i" >> /var/log/nginx/error.log
-                  sleep 1
-                done
+              if [ "$START" -eq "1" ]; then
+                # Allocate memory in a loop until OOM
+                python3 -c '
+                x = []
+                while True:
+                    x.append(" " * 1024 * 1024)  # Allocate 1MB chunks
+                '
               else
                 sleep 1
               fi
@@ -80,7 +81,7 @@ spec:
     targetPort: 8080
 
 ---
-# Remediation Policy for Error-based pod restart
+# Remediation Policy for OOM-based pod restart
 apiVersion: remediation.kubemedic.io/v1alpha1
 kind: SelfRemediationPolicy
 metadata:
@@ -88,11 +89,11 @@ metadata:
   namespace: default
 spec:
   rules:
-    - name: high-error-rate
+    - name: oom-kill
       conditions:
-        - type: ErrorRate
-          threshold: "5"     # Trigger when error rate exceeds 5 per second
-          duration: "30s"    # Must exceed for 30 seconds
+        - type: OOMKilled
+          threshold: "1"     # Trigger on first OOM event
+          duration: "1s"     # Immediate action
       actions:
         - type: RestartPod
           target:
@@ -119,22 +120,18 @@ spec:
 # 2. Wait for the pod to be ready:
 #    kubectl wait --for=condition=ready pod -l app=error-test
 #
-# 3. Generate errors (5 per second):
+# 3. Trigger memory pressure:
 #    kubectl exec $(kubectl get pod -l app=error-test -o jsonpath='{.items[0].metadata.name}') \
-#      -- /bin/sh -c 'echo "5" > /tmp/control/error_rate'
+#      -- /bin/sh -c 'echo "1" > /tmp/control/start_oom'
 #
-# 4. Monitor error logs:
-#    kubectl logs -f -l app=error-test
-#
-# 5. Watch pod restarts:
+# 4. Monitor pod status:
 #    kubectl get pods -l app=error-test -w
+#
+# 5. Check pod events for OOM:
+#    kubectl describe pod -l app=error-test
 #
 # 6. Check remediation policy status:
 #    kubectl get selfremediationpolicy error-restart-policy -o yaml
 #
-# 7. Stop error generation:
-#    kubectl exec $(kubectl get pod -l app=error-test -o jsonpath='{.items[0].metadata.name}') \
-#      -- /bin/sh -c 'echo "0" > /tmp/control/error_rate'
-#
-# 8. Clean up:
+# 7. Clean up:
 #    kubectl delete -f pod-restart-with-test.yaml

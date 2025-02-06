@@ -87,6 +87,63 @@ kubectl patch validatingwebhookconfiguration kubemedic-validating-webhook --type
 
 Run this script after deploying your webhook and creating the Secret to update the `caBundle` automatically.
 
+## Certificate Configuration
+
+KubeMedic's webhook validation supports two methods for TLS certificate management:
+
+### Option 1: Using cert-manager (Recommended)
+
+If you have cert-manager installed in your cluster, simply apply the provided configuration:
+
+```bash
+kubectl apply -f deploy/webhook-cert.yaml
+```
+
+This will automatically:
+- Create a self-signed ClusterIssuer
+- Generate the required certificates
+- Configure the webhook to use these certificates
+- Automatically handle certificate rotation
+
+### Option 2: Using Custom Certificates
+
+If you prefer to manage your own certificates or don't want to use cert-manager:
+
+1. Generate certificates using the provided script:
+```bash
+./scripts/generate-certs.sh
+```
+
+This will generate the following files in the `deploy/` directory:
+- CA key and certificate
+- Webhook server key and certificate
+- Required Kubernetes manifests (webhook-secret.yaml and webhook-config.yaml)
+
+2. Apply the generated configurations:
+```bash
+kubectl apply -f deploy/webhook-secret.yaml
+kubectl apply -f deploy/webhook-config.yaml
+```
+
+The script handles:
+- Proper DNS names for the webhook service
+- TLS key and certificate generation
+- CA bundle configuration
+- Kubernetes Secret creation
+- ValidatingWebhookConfiguration setup
+
+Note: All generated certificate files and configurations are placed in the `deploy/` directory and are automatically ignored by git.
+
+### Switching Between Methods
+
+To switch from one method to another:
+1. Delete the existing configuration:
+```bash
+kubectl delete -f deploy/webhook-cert.yaml
+```
+
+2. Apply the new configuration using either method described above
+
 ## Key Features
 
 ### 🛡️ Safe by Default
@@ -116,7 +173,7 @@ kubectl apply -f https://github.com/kubernetes-sigs/metrics-server/releases/late
 
 2. **Install KubeMedic**
 ```bash
-kubectl apply -f https://raw.githubusercontent.com/ikepcampbell/kubemedic/main/config/deploy/kubemedic.yaml
+kubectl apply -f deploy/components.yaml
 ```
 
 3. **Create a Simple Policy**
@@ -338,3 +395,173 @@ KubeMedic is composed of several components, each packaged as a separate Docker 
 - **Flexibility:** Different components can be updated or replaced independently, facilitating continuous integration and deployment.
 
 By understanding the roles of each component and managing them effectively, you can ensure that your Kubernetes operator functions smoothly and efficiently.
+
+## Certificate Management
+
+KubeMedic's webhook supports two certificate management options:
+
+### Option 1: Using cert-manager (Recommended)
+
+1. Install cert-manager if not already installed:
+```bash
+kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.14.3/cert-manager.yaml
+```
+
+2. Apply the webhook configuration:
+```bash
+kubectl apply -f deploy/webhook-cert.yaml
+```
+
+The certificates will be automatically managed and renewed by cert-manager.
+
+### Option 2: Using Custom Certificates
+
+1. Edit `deploy/webhook-cert.yaml` and replace the Secret data with your base64-encoded certificates:
+```yaml
+apiVersion: v1
+kind: Secret
+metadata:
+  name: kubemedic-webhook-cert
+  namespace: kubemedic
+type: kubernetes.io/tls
+data:
+  tls.crt: <your-base64-encoded-cert>
+  tls.key: <your-base64-encoded-key>
+  ca.crt: <your-base64-encoded-ca>  # If using a custom CA
+```
+
+2. Remove the cert-manager annotation from the ValidatingWebhookConfiguration in the same file.
+
+3. Apply your configuration:
+```bash
+kubectl apply -f deploy/webhook-cert.yaml
+```
+
+### Automatic Certificate Renewal
+
+KubeMedic automatically handles certificate renewals:
+- The webhook pod will restart automatically when certificates are renewed
+- A cooldown period prevents excessive restarts
+- No manual intervention required for either cert-manager or custom certificates
+
+# KubeMedic Webhook
+
+A Kubernetes admission webhook for validating self-remediation policies in the KubeMedic system.
+
+## Features
+
+- Validates SelfRemediationPolicy resources
+- Supports automatic certificate management with cert-manager
+- Allows custom certificate configuration
+- Automatic pod restart on certificate renewal
+- Configurable resource limits and security settings
+
+## Prerequisites
+
+- Kubernetes cluster (1.16+)
+- Helm 3.0+
+- cert-manager (optional, but recommended for certificate management)
+
+## Installation
+
+1. Install cert-manager (recommended):
+```bash
+kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.13.0/cert-manager.yaml
+```
+
+2. Create the kubemedic namespace:
+```bash
+kubectl create namespace kubemedic
+```
+
+3. Deploy the webhook:
+```bash
+kubectl apply -f deploy/components.yaml
+```
+
+## Configuration
+
+The webhook can be configured using the `values.yaml` file. Here are the main configuration options:
+
+### Certificate Management
+
+Two options are available for certificate management:
+
+1. Using cert-manager (recommended):
+```yaml
+certificates:
+  useCertManager: true
+```
+
+2. Using custom certificates:
+```yaml
+certificates:
+  useCertManager: false
+  custom:
+    tlsCert: "base64-encoded-cert"
+    tlsKey: "base64-encoded-key"
+    caCert: "base64-encoded-ca"
+```
+
+### Resource Configuration
+
+Configure resource limits and requests:
+```yaml
+webhook:
+  resources:
+    limits:
+      cpu: 100m
+      memory: 128Mi
+    requests:
+      cpu: 50m
+      memory: 64Mi
+```
+
+### Certificate Renewal
+
+Configure certificate renewal behavior:
+```yaml
+certificateRenewal:
+  threshold: "7d"
+  cooldownPeriod: "1h"
+  checkDuration: "1m"
+```
+
+## Verification
+
+To verify the webhook is running:
+
+```bash
+kubectl get pods -n kubemedic
+kubectl get validatingwebhookconfigurations
+```
+
+## Troubleshooting
+
+1. Check webhook pod logs:
+```bash
+kubectl logs -n kubemedic -l app.kubernetes.io/name=kubemedic,app.kubernetes.io/component=webhook
+```
+
+2. Check certificate status (if using cert-manager):
+```bash
+kubectl get certificate -n kubemedic
+kubectl get certificaterequest -n kubemedic
+```
+
+3. Common issues:
+   - Certificate issues: Ensure cert-manager is running or custom certificates are properly configured
+   - Webhook unavailable: Check if the service and pod are running
+   - Validation failures: Check webhook logs for specific validation errors
+
+## Security
+
+The webhook runs with security best practices:
+- Non-root user
+- Read-only filesystem
+- Dropped capabilities
+- Secure pod security context
+
+## License
+
+This project is licensed under the Apache License 2.0 - see the LICENSE file for details.

@@ -7,9 +7,10 @@ This guide walks you through the process of installing KubeMedic in your Kuberne
 ### Required Components
 - Kubernetes cluster (v1.16+)
 - kubectl configured with admin access
-- Prometheus installed for metrics collection
+- Metrics Server installed for metrics collection
 
 ### Optional Components
+- cert-manager (v1.14+) for automated certificate management
 - Grafana (v8.0+) for visualization
 - Helm (v3+) for package management
 - Argo CD for GitOps workflows
@@ -41,19 +42,66 @@ helm install kubemedic kubemedic/kubemedic \
   --create-namespace
 ```
 
-### Method 3: Manual Installation
+## Certificate Management
 
+KubeMedic's webhook uses a unified certificate configuration that supports both cert-manager and custom certificates in a single configuration file.
+
+### Option 1: Using cert-manager (Recommended)
+
+1. Install cert-manager if not already installed:
 ```bash
-# Clone the repository
-git clone https://github.com/ikepcampbell/kubemedic.git
-cd kubemedic
-
-# Install CRDs
-make install
-
-# Deploy the operator
-make deploy IMG=ghcr.io/ikepcampbell/kubemedic:latest
+kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.14.3/cert-manager.yaml
 ```
+
+2. Apply the webhook configuration without modifications:
+```bash
+kubectl apply -f deploy/webhook-cert.yaml
+```
+
+The configuration includes:
+- A Certificate resource for cert-manager
+- A self-signed ClusterIssuer
+- Webhook configuration with cert-manager annotations
+
+### Option 2: Using Custom Certificates
+
+1. Edit `deploy/webhook-cert.yaml`:
+   - Comment out or remove the cert-manager Certificate and ClusterIssuer sections
+   - Uncomment the Secret section and replace placeholders:
+```yaml
+apiVersion: v1
+kind: Secret
+metadata:
+  name: kubemedic-webhook-cert
+  namespace: kubemedic
+type: kubernetes.io/tls
+data:
+  tls.crt: <your-base64-encoded-cert>
+  tls.key: <your-base64-encoded-key>
+  ca.crt: <your-base64-encoded-ca>
+```
+
+2. In the ValidatingWebhookConfiguration section:
+   - Remove the cert-manager annotation
+   - Uncomment and set the caBundle field
+
+3. Apply your modified configuration:
+```bash
+kubectl apply -f deploy/webhook-cert.yaml
+```
+
+### Automatic Certificate Management
+
+KubeMedic includes two layers of certificate management:
+
+1. **Automatic Renewal**:
+   - With cert-manager: Certificates are automatically renewed
+   - With custom certificates: You manage renewal externally
+
+2. **Certificate Expiry Monitoring**:
+   - Automatic monitoring of certificate expiration
+   - Webhook pod restarts when certificates are within 7 days of expiry
+   - Configurable cooldown period (default: 1 hour) prevents restart storms
 
 ## Verifying the Installation
 
@@ -66,6 +114,7 @@ Expected output:
 ```
 NAME                                  READY   STATUS    RESTARTS   AGE
 kubemedic-controller-manager-xxxxx    1/1     Running   0          1m
+kubemedic-webhook-yyyyy              1/1     Running   0          1m
 ```
 
 2. Verify CRD installation:
@@ -81,6 +130,11 @@ selfremediationpolicies.remediation.kubemedic.io   2024-02-05T12:00:00Z
 3. Check operator logs:
 ```bash
 kubectl logs -n kubemedic deployment/kubemedic-controller-manager
+```
+
+4. Verify webhook configuration:
+```bash
+kubectl get validatingwebhookconfigurations | grep kubemedic
 ```
 
 ## Configuration
@@ -99,6 +153,10 @@ grafana:
 operator:
   logLevel: info
   metricsPort: 8080
+
+webhook:
+  certManager:
+    enabled: true  # Set to false if using custom certificates
 ```
 
 ### Applying Configuration
@@ -121,14 +179,22 @@ helm upgrade kubemedic kubemedic/kubemedic \
 
 ### Common Issues
 
-1. CRDs not installing:
+1. Certificate Issues:
 ```bash
-kubectl apply -f config/crd/bases/ --force
+# Check webhook pod logs
+kubectl logs -n kubemedic -l app.kubernetes.io/component=webhook
+
+# Check certificate secret
+kubectl get secret -n kubemedic kubemedic-webhook-cert
 ```
 
-2. Operator pod not starting:
+2. Webhook Configuration Issues:
 ```bash
-kubectl describe pod -n kubemedic kubemedic-controller-manager-xxxxx
+# Check webhook configuration
+kubectl get validatingwebhookconfigurations kubemedic-validating-webhook -o yaml
+
+# Check webhook service
+kubectl get svc -n kubemedic kubemedic-webhook-service
 ```
 
 3. RBAC issues:

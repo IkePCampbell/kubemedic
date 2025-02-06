@@ -28,3 +28,24 @@ go.work
 *.crt
 *.key
 *.pem
+
+# Certificate files
+*.key
+*.crt
+*.csr
+*.srl
+csr.conf
+webhook-secret.yaml
+webhook-config.yaml
+
+# Generated files
+bin/
+testbin/
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Dependency directories (remove the comment below to include it)
+vendor/

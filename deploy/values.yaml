@@ -26,14 +26,23 @@ controller:
   # Log level (debug, info, warn, error)
   logLevel: "info"
 
-# Webhook configuration
-webhook:
-  # Enable validation webhook
-  enabled: true
+# Certificate Management Configuration
+certificates:
+  # Use cert-manager for automatic certificate management (recommended)
+  useCertManager: true
   
-  # Container image configuration
+  # Custom certificate configuration (only used if useCertManager: false)
+  custom:
+    # Base64 encoded certificates (required if useCertManager: false)
+    tlsCert: ""
+    tlsKey: ""
+    caCert: ""
+
+# Webhook Configuration
+webhook:
+  # Image configuration
   image:
-    repository: ikepcampbell/kubemedic-webhook
+    repository: ghcr.io/ikepcampbell/kubemedic-webhook
     tag: latest
     pullPolicy: IfNotPresent
   
@@ -46,14 +55,34 @@ webhook:
       cpu: 50m
       memory: 64Mi
   
-  # TLS configuration
-  tls:
-    # Enable automatic cert generation using cert-manager
-    certManager: true
-    # Or provide your own certificates
-    # cert: ""
-    # key: ""
-    # caBundle: ""
+  # Security context
+  securityContext:
+    runAsNonRoot: true
+    seccompProfile:
+      type: RuntimeDefault
+    allowPrivilegeEscalation: false
+    capabilities:
+      drop:
+        - ALL
+  
+  # Service configuration
+  service:
+    type: ClusterIP
+    port: 443
+    targetPort: 8443
+
+# Certificate Renewal Configuration
+certificateRenewal:
+  # Time before expiry to trigger renewal
+  threshold: "7d"
+  # Minimum time between renewal attempts
+  cooldownPeriod: "1h"
+  # Duration to wait before taking action
+  checkDuration: "1m"
+
+# Image Pull Secrets
+imagePullSecrets:
+  - name: ghcr-secret
 
 # RBAC configuration
 rbac:

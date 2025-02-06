@@ -40,6 +40,9 @@ func (v *KubeMedicValidator) Handle(ctx context.Context, req admission.Request) 
 
 // InjectDecoder injects the decoder
 func (v *KubeMedicValidator) InjectDecoder(d *admission.Decoder) error {
+	if d == nil {
+		return fmt.Errorf("decoder cannot be nil")
+	}
 	v.decoder = *d
 	return nil
 }
@@ -99,6 +102,11 @@ func (v *KubeMedicValidator) validateResources(ctx context.Context, policy *reme
 
 	for _, rule := range policy.Spec.Rules {
 		for _, action := range rule.Actions {
+			// Check if Target is initialized
+			if action.Target.Kind == "" || action.Target.Name == "" {
+				return fmt.Errorf("action target must specify both kind and name")
+			}
+
 			if !allowedResources[strings.ToLower(action.Target.Kind)] {
 				return fmt.Errorf("resource type %s is not allowed", action.Target.Kind)
 			}
@@ -236,9 +244,19 @@ func (v *KubeMedicValidator) validateActionParams(action remediationv1alpha1.Act
 		if action.ScalingParams == nil {
 			return fmt.Errorf("scaling parameters required for action type %s", action.Type)
 		}
+		if action.ScalingParams.TemporaryMaxReplicas == nil {
+			return fmt.Errorf("temporaryMaxReplicas must be specified for scaling actions")
+		}
 	case remediationv1alpha1.AdjustHPALimits:
 		if action.ScalingParams == nil || action.ScalingParams.TemporaryMaxReplicas == nil {
 			return fmt.Errorf("temporary max replicas required for HPA adjustment")
+		}
+	}
+
+	// Validate scaling duration if specified
+	if action.ScalingParams != nil && action.ScalingParams.ScalingDuration != "" {
+		if _, err := time.ParseDuration(action.ScalingParams.ScalingDuration); err != nil {
+			return fmt.Errorf("invalid scaling duration format: %v", err)
 		}
 	}
 
