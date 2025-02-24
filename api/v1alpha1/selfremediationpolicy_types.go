@@ -24,32 +24,32 @@ import (
 type ConditionType string
 
 const (
-	CPUUsage       ConditionType = "CPUUsage"
-	MemoryUsage    ConditionType = "MemoryUsage"
-	ErrorRate      ConditionType = "ErrorRate"
-	PodRestarts    ConditionType = "PodRestarts"
+	CPUUsage    ConditionType = "CPUUsage"
+	MemoryUsage ConditionType = "MemoryUsage"
+	ErrorRate   ConditionType = "ErrorRate"
+	PodRestarts ConditionType = "PodRestarts"
 )
 
 // ActionType defines the type of remediation action
 type ActionType string
 
 const (
-	ScaleUp           ActionType = "ScaleUp"
-	ScaleDown         ActionType = "ScaleDown"
-	RestartPod        ActionType = "RestartPod"
+	ScaleUp            ActionType = "ScaleUp"
+	ScaleDown          ActionType = "ScaleDown"
+	RestartPod         ActionType = "RestartPod"
 	RollbackDeployment ActionType = "RollbackDeployment"
-	UpdateResources   ActionType = "UpdateResources"
-	AdjustHPALimits  ActionType = "AdjustHPALimits"
+	UpdateResources    ActionType = "UpdateResources"
+	AdjustHPALimits    ActionType = "AdjustHPALimits"
 )
 
 // Condition defines what to monitor
 type Condition struct {
 	// Type of condition to monitor
 	Type ConditionType `json:"type"`
-	
+
 	// Threshold value as a string (e.g., "80%", "100m", "2")
 	Threshold string `json:"threshold"`
-	
+
 	// Duration the condition must be true before taking action
 	// +optional
 	Duration string `json:"duration,omitempty"`
@@ -59,10 +59,10 @@ type Condition struct {
 type Target struct {
 	// Kind of the target resource
 	Kind string `json:"kind"`
-	
+
 	// Name of the target resource
 	Name string `json:"name"`
-	
+
 	// Namespace of the target resource
 	// +optional
 	Namespace string `json:"namespace,omitempty"`
@@ -91,7 +91,7 @@ type ScalingParameters struct {
 type Action struct {
 	// Type of action to take
 	Type ActionType `json:"type"`
-	
+
 	// Target resource for the action
 	// +optional
 	Target Target `json:"target,omitempty"`
@@ -117,10 +117,10 @@ type Action struct {
 type Rule struct {
 	// Name of the rule
 	Name string `json:"name"`
-	
+
 	// Conditions that trigger the rule
 	Conditions []Condition `json:"conditions"`
-	
+
 	// Actions to take when conditions are met
 	Actions []Action `json:"actions"`
 }
@@ -129,7 +129,7 @@ type Rule struct {
 type GrafanaIntegration struct {
 	// Whether Grafana integration is enabled
 	Enabled bool `json:"enabled"`
-	
+
 	// Webhook URL for Grafana alerts
 	// +optional
 	WebhookURL string `json:"webhookUrl,omitempty"`
@@ -137,28 +137,52 @@ type GrafanaIntegration struct {
 
 // SelfRemediationPolicySpec defines the desired state
 type SelfRemediationPolicySpec struct {
-	// Rules for remediation
+	// TargetRef specifies the target resource to monitor
+	TargetRef TargetReference `json:"targetRef"`
+
+	// CPUThreshold is the CPU usage threshold in cores
+	CPUThreshold string `json:"cpuThreshold"`
+
+	// Rules defines the remediation rules
 	Rules []Rule `json:"rules"`
-	
+
 	// CooldownPeriod between remediation actions
 	// +optional
 	CooldownPeriod string `json:"cooldownPeriod,omitempty"`
-	
+
 	// GrafanaIntegration configuration
 	// +optional
 	GrafanaIntegration *GrafanaIntegration `json:"grafanaIntegration,omitempty"`
+}
+
+// TargetReference contains the reference to the target resource
+type TargetReference struct {
+	// Name of the target resource
+	Name string `json:"name"`
+
+	// Namespace of the target resource
+	Namespace string `json:"namespace"`
+
+	// Kind of the target resource
+	Kind string `json:"kind"`
 }
 
 // SelfRemediationPolicyStatus defines the observed state
 type SelfRemediationPolicyStatus struct {
 	// Last time the policy was evaluated
 	LastEvaluationTime *metav1.Time `json:"lastEvaluationTime,omitempty"`
-	
+
 	// Last remediation action taken
 	LastRemediationAction string `json:"lastRemediationAction,omitempty"`
-	
+
 	// Current state of the policy
 	State string `json:"state,omitempty"`
+
+	// LastChecked is the last time the policy was checked
+	LastChecked metav1.Time `json:"lastChecked,omitempty"`
+
+	// Active indicates if the policy is currently active
+	Active bool `json:"active"`
 }
 
 //+kubebuilder:object:root=true

@@ -90,7 +90,7 @@ spec:
   rules:
     - name: cpu-high-usage
       conditions:
-        - type: PodCPUUsage
+        - type: CPUUsage
           threshold: "80"    # Trigger when CPU usage exceeds 80%
           duration: "30s"    # Must exceed for 30 seconds
       actions:
@@ -98,10 +98,6 @@ spec:
           target:
             kind: Deployment
             name: cpu-test
-          scalingParams:
-            temporaryMaxReplicas: 3
-            scalingDuration: "2m"
-            revertStrategy: "Immediate"
   cooldownPeriod: "1m"    # Wait 1 minute between scaling actions
 
 ---

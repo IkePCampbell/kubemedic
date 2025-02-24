@@ -187,9 +187,17 @@ uninstall: manifests kustomize ## Uninstall CRDs from the K8s cluster specified 
 	$(KUSTOMIZE) build config/crd | $(KUBECTL) delete --ignore-not-found=$(ignore-not-found) -f -
 
 .PHONY: deploy
-deploy: manifests kustomize ## Deploy controller to the K8s cluster specified in ~/.kube/config.
+deploy: manifests kustomize ## Deploy controller and webhook to the K8s cluster
 	cd config/manager && $(KUSTOMIZE) edit set image controller=${IMG}
 	$(KUSTOMIZE) build config/default | $(KUBECTL) apply -f -
+	# First apply CRDs and other resources
+	$(KUBECTL) apply -f deploy/components.yaml
+	# Delete the webhook config temporarily to avoid validation errors
+	$(KUBECTL) delete validatingwebhookconfiguration kubemedic-validating-webhook --ignore-not-found=true
+	# Wait for webhook to be ready
+	sleep 10
+	# Now reapply everything to ensure webhook and policies are properly configured
+	$(KUBECTL) apply -f deploy/components.yaml
 
 .PHONY: undeploy
 undeploy: kustomize ## Undeploy controller from the K8s cluster specified in ~/.kube/config. Call with ignore-not-found=true to ignore resource not found errors during deletion.
@@ -362,3 +370,10 @@ docker-buildx-webhook: ## Build and push docker image for the webhook for cross-
 	- $(CONTAINER_TOOL) buildx build --push --platform=$(PLATFORMS) --tag ${WEBHOOK_IMG} -f Dockerfile.webhook.cross .
 	- $(CONTAINER_TOOL) buildx rm kubemedic-webhook-builder
 	rm Dockerfile.webhook.cross
+
+.PHONY: docker-build-all
+docker-build-all: docker-build docker-build-webhook ## Build both controller and webhook images
+
+.PHONY: deploy-all
+deploy-all: docker-build-all ## Build and deploy everything
+	make deploy

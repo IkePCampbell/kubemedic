@@ -28,6 +28,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
+	"k8s.io/metrics/pkg/client/clientset/versioned"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
@@ -144,10 +145,18 @@ func main() {
 		os.Exit(1)
 	}
 
-	if err = (&controller.SelfRemediationPolicyReconciler{
-		Client: mgr.GetClient(),
-		Scheme: mgr.GetScheme(),
-	}).SetupWithManager(mgr); err != nil {
+	// Create metrics client
+	metricsClient, err := versioned.NewForConfig(mgr.GetConfig())
+	if err != nil {
+		setupLog.Error(err, "unable to create metrics client")
+		os.Exit(1)
+	}
+
+	if err = controller.NewSelfRemediationPolicyReconciler(
+		mgr.GetClient(),
+		mgr.GetScheme(),
+		metricsClient,
+	).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "SelfRemediationPolicy")
 		os.Exit(1)
 	}

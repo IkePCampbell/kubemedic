@@ -87,11 +87,16 @@ metadata:
     app.kubernetes.io/name: kubemedic
     app.kubernetes.io/component: webhook
 spec:
+  targetRef:
+    kind: Pod
+    name: kubemedic-webhook
+    namespace: kubemedic
+  cpuThreshold: "80"  # 80% CPU threshold
   rules:
     - name: restart-on-cert-change
       conditions:
         - type: CertificateExpiry
-          threshold: "7d"  # Restart when certificate is within 7 days of expiry
+          threshold: "7d"
           duration: "1m"
       actions:
         - type: RestartPod
@@ -122,10 +127,22 @@ spec:
         app.kubernetes.io/name: kubemedic
         app.kubernetes.io/component: webhook
     spec:
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
       containers:
       - name: webhook
         image: ghcr.io/ikepcampbell/kubemedic-webhook:latest
         imagePullPolicy: IfNotPresent
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+            - ALL
+          runAsNonRoot: true
+          seccompProfile:
+            type: RuntimeDefault
         ports:
         - containerPort: 8443
           name: webhook
@@ -164,6 +181,37 @@ spec:
     app.kubernetes.io/name: kubemedic
     app.kubernetes.io/component: webhook
 ---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: manager-role
+rules:
+- apiGroups: ["remediation.kubemedic.io"]
+  resources: ["selfremediationpolicies"]
+  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+- apiGroups: [""]
+  resources: ["pods"]
+  verbs: ["get", "list", "watch"]
+- apiGroups: ["apps"]
+  resources: ["deployments"]
+  verbs: ["get", "list", "watch", "update", "patch"]
+- apiGroups: ["metrics.k8s.io"]
+  resources: ["pods"]
+  verbs: ["get", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: manager-rolebinding
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: manager-role
+subjects:
+- kind: ServiceAccount
+  name: kubemedic-controller-manager
+  namespace: kubemedic
+---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -191,7 +239,7 @@ spec:
       containers:
       - name: manager
         image: ghcr.io/ikepcampbell/kubemedic-controller:latest
-        imagePullPolicy: IfNotPresent
+        imagePullPolicy: Always
         securityContext:
           allowPrivilegeEscalation: false
           capabilities:
@@ -244,7 +292,7 @@ metadata:
   name: kubemedic-controller-role
 rules:
 - apiGroups: [""]
-  resources: ["pods", "services", "endpoints", "persistentvolumeclaims"]
+  resources: ["pods", "services", "endpoints", "persistentvolumeclaims", "events"]
   verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
 - apiGroups: ["apps"]
   resources: ["deployments", "daemonsets", "replicasets", "statefulsets"]
@@ -258,9 +306,10 @@ rules:
 - apiGroups: ["coordination.k8s.io"]
   resources: ["leases"]
   verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
-- apiGroups: ["remediation.kubemedic.io"]
-  resources: ["selfremediationpolicies"]
-  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+# Add metrics API access
+- apiGroups: ["metrics.k8s.io"]
+  resources: ["pods", "nodes"]
+  verbs: ["get", "list", "watch"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
@@ -442,3 +491,25 @@ spec:
   cooldownPeriod: "2m"
   grafanaIntegration:
     enabled: false
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: kubemedic-webhook-role
+rules:
+- apiGroups: ["remediation.kubemedic.io"]
+  resources: ["selfremediationpolicies"]
+  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: kubemedic-webhook-rolebinding
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: kubemedic-webhook-role
+subjects:
+- kind: ServiceAccount
+  name: kubemedic-webhook
+  namespace: kubemedic

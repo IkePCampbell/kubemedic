@@ -43,11 +43,14 @@ spec:
               
               if [ "$START" -eq "1" ]; then
                 # Allocate memory in a loop until OOM
-                python3 -c '
-                x = []
-                while True:
-                    x.append(" " * 1024 * 1024)  # Allocate 1MB chunks
-                '
+                while true; do
+                  # Create a 10MB file in memory
+                  dd if=/dev/zero of=/dev/shm/memory-file bs=1M count=10
+                  # Keep it in memory by reading it
+                  cat /dev/shm/memory-file > /dev/null
+                  echo "Allocated another 10MB"
+                  sleep 0.1
+                done
               else
                 sleep 1
               fi

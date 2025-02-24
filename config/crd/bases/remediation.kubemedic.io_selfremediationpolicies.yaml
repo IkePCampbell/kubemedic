@@ -43,6 +43,9 @@ spec:
               cooldownPeriod:
                 description: CooldownPeriod between remediation actions
                 type: string
+              cpuThreshold:
+                description: CPUThreshold is the CPU usage threshold in cores
+                type: string
               grafanaIntegration:
                 description: GrafanaIntegration configuration
                 properties:
@@ -56,7 +59,7 @@ spec:
                 - enabled
                 type: object
               rules:
-                description: Rules for remediation
+                description: Rules defines the remediation rules
                 items:
                   description: Rule defines a single remediation rule
                   properties:
@@ -151,12 +154,38 @@ spec:
                   - name
                   type: object
                 type: array
+              targetRef:
+                description: TargetRef specifies the target resource to monitor
+                properties:
+                  kind:
+                    description: Kind of the target resource
+                    type: string
+                  name:
+                    description: Name of the target resource
+                    type: string
+                  namespace:
+                    description: Namespace of the target resource
+                    type: string
+                required:
+                - kind
+                - name
+                - namespace
+                type: object
             required:
+            - cpuThreshold
             - rules
+            - targetRef
             type: object
           status:
             description: SelfRemediationPolicyStatus defines the observed state
             properties:
+              active:
+                description: Active indicates if the policy is currently active
+                type: boolean
+              lastChecked:
+                description: LastChecked is the last time the policy was checked
+                format: date-time
+                type: string
               lastEvaluationTime:
                 description: Last time the policy was evaluated
                 format: date-time
@@ -167,6 +196,8 @@ spec:
               state:
                 description: Current state of the policy
                 type: string
+            required:
+            - active
             type: object
         type: object
     served: true

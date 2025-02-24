@@ -1,5 +1,5 @@
 /*
-Copyright 2025.
+Copyright 2024.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -20,18 +20,22 @@ import (
 	"context"
 	"fmt"
 	"strconv"
+	"sync"
 	"time"
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/client-go/kubernetes"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/metrics/pkg/client/clientset/versioned"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	remediationv1alpha1 "kubemedic/api/v1alpha1"
+
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 // SelfRemediationPolicyReconciler reconciles a SelfRemediationPolicy object
@@ -39,122 +43,192 @@ type SelfRemediationPolicyReconciler struct {
 	client.Client
 	Scheme         *runtime.Scheme
 	MetricsWatcher *MetricsWatcher
+	// Track active remediations
+	activeRemediations sync.Map
+}
+
+// RemediationState tracks the state of active remediations
+type RemediationState struct {
+	LastChecked time.Time
+	Policy      types.NamespacedName
+	Target      types.NamespacedName
 }
 
 func NewSelfRemediationPolicyReconciler(
 	client client.Client,
 	scheme *runtime.Scheme,
-	metricsClient *versioned.Clientset,
-	kubeClient *kubernetes.Clientset,
+	metricsClient versioned.Interface,
 ) *SelfRemediationPolicyReconciler {
+	if client == nil {
+		panic("client cannot be nil")
+	}
+	if scheme == nil {
+		panic("scheme cannot be nil")
+	}
+	if metricsClient == nil {
+		panic("metricsClient cannot be nil")
+	}
+
+	metricsWatcher := NewMetricsWatcher(metricsClient)
+	if metricsWatcher == nil {
+		panic("failed to create metrics watcher")
+	}
+
 	return &SelfRemediationPolicyReconciler{
 		Client:         client,
 		Scheme:         scheme,
-		MetricsWatcher: NewMetricsWatcher(metricsClient, kubeClient),
+		MetricsWatcher: metricsWatcher,
 	}
+}
+
+// cleanupStaleRemediations removes tracking for resources that no longer exist
+func (r *SelfRemediationPolicyReconciler) cleanupStaleRemediations(ctx context.Context) {
+	log := log.FromContext(ctx)
+
+	r.activeRemediations.Range(func(key, value interface{}) bool {
+		state := value.(*RemediationState)
+
+		// Check if policy still exists
+		var policy remediationv1alpha1.SelfRemediationPolicy
+		if err := r.Get(ctx, state.Policy, &policy); err != nil {
+			if errors.IsNotFound(err) {
+				log.Info("Cleaning up state for deleted policy",
+					"policy", state.Policy.String())
+				r.activeRemediations.Delete(key)
+			}
+			return true
+		}
+
+		// Check if target still exists
+		var deployment appsv1.Deployment
+		if err := r.Get(ctx, state.Target, &deployment); err != nil {
+			if errors.IsNotFound(err) {
+				log.Info("Cleaning up state for deleted target",
+					"target", state.Target.String())
+				r.activeRemediations.Delete(key)
+			}
+			return true
+		}
+
+		// Remove stale entries older than 1 hour
+		if time.Since(state.LastChecked) > time.Hour {
+			log.Info("Cleaning up stale remediation state",
+				"policy", state.Policy.String(),
+				"target", state.Target.String())
+			r.activeRemediations.Delete(key)
+		}
+
+		return true
+	})
+}
+
+// trackRemediation adds or updates tracking for an active remediation
+func (r *SelfRemediationPolicyReconciler) trackRemediation(
+	policy types.NamespacedName,
+	target types.NamespacedName,
+) {
+	state := &RemediationState{
+		LastChecked: time.Now(),
+		Policy:      policy,
+		Target:      target,
+	}
+	key := fmt.Sprintf("%s/%s", policy.String(), target.String())
+	r.activeRemediations.Store(key, state)
 }
 
 // Reconcile handles the reconciliation loop for SelfRemediationPolicy
 func (r *SelfRemediationPolicyReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
-	log := log.FromContext(ctx).WithValues(
-		"controller", "selfremediationpolicy",
-		"namespace", req.Namespace,
-		"name", req.Name,
-	)
+	log := log.FromContext(ctx)
 
-	// Get the policy
+	// Periodically cleanup stale remediations
+	r.cleanupStaleRemediations(ctx)
+
 	var policy remediationv1alpha1.SelfRemediationPolicy
 	if err := r.Get(ctx, req.NamespacedName, &policy); err != nil {
-		return ctrl.Result{}, client.IgnoreNotFound(err)
+		if errors.IsNotFound(err) {
+			return ctrl.Result{}, nil
+		}
+		log.Error(err, "Failed to get SelfRemediationPolicy")
+		return ctrl.Result{}, err
 	}
 
-	log.Info("Starting policy reconciliation",
-		"rules_count", len(policy.Spec.Rules),
-		"cooldown_period", policy.Spec.CooldownPeriod,
-	)
-
-	// Process each rule
-	for _, rule := range policy.Spec.Rules {
-		ruleLog := log.WithValues(
-			"rule_name", rule.Name,
-			"conditions_count", len(rule.Conditions),
-			"actions_count", len(rule.Actions),
-		)
-
-		// Get target deployment
-		var deployment appsv1.Deployment
-		if err := r.Get(ctx, client.ObjectKey{
-			Namespace: policy.Namespace,
-			Name:      rule.Actions[0].Target.Name,
-		}, &deployment); err != nil {
-			ruleLog.Error(err, "Failed to get deployment")
-			continue
+	// Get the pod referenced by the policy
+	var pod corev1.Pod
+	if err := r.Get(ctx, types.NamespacedName{
+		Namespace: policy.Spec.TargetRef.Namespace,
+		Name:      policy.Spec.TargetRef.Name,
+	}, &pod); err != nil {
+		if errors.IsNotFound(err) {
+			log.Info("Target pod not found", "pod", policy.Spec.TargetRef.Name)
+			return ctrl.Result{RequeueAfter: time.Second * 30}, nil
 		}
+		log.Error(err, "unable to fetch target Pod")
+		return ctrl.Result{}, err
+	}
 
-		ruleLog.V(1).Info("Processing deployment",
-			"deployment_name", deployment.Name,
-			"current_replicas", *deployment.Spec.Replicas,
-		)
+	// Parse CPU threshold
+	threshold, err := strconv.ParseFloat(policy.Spec.CPUThreshold, 64)
+	if err != nil {
+		log.Error(err, "failed to parse CPU threshold")
+		return ctrl.Result{}, err
+	}
 
-		// Get pods for the deployment
-		pods := &corev1.PodList{}
-		if err := r.List(ctx, pods, client.InNamespace(policy.Namespace),
-			client.MatchingLabels(deployment.Spec.Selector.MatchLabels)); err != nil {
-			ruleLog.Error(err, "Failed to list pods")
-			continue
-		}
+	// Check if pod is over threshold
+	isOver, err := r.MetricsWatcher.IsPodOverThreshold(&pod, threshold)
+	if err != nil {
+		log.Error(err, "failed to check pod CPU threshold")
+		return ctrl.Result{RequeueAfter: time.Second * 10}, nil
+	}
 
-		ruleLog.V(1).Info("Found pods for deployment",
-			"pod_count", len(pods.Items),
-		)
-
-		// Check each pod's metrics
-		for _, pod := range pods.Items {
-			podLog := ruleLog.WithValues(
-				"pod_name", pod.Name,
-				"pod_phase", pod.Status.Phase,
-			)
-
-			for _, condition := range rule.Conditions {
-				threshold, _ := strconv.ParseFloat(condition.Threshold, 64)
-				duration, _ := time.ParseDuration(condition.Duration)
-
-				podLog.V(1).Info("Checking pod metrics",
-					"condition_type", condition.Type,
-					"threshold", threshold,
-					"duration", duration,
-				)
-
-				isOverThreshold, err := r.MetricsWatcher.IsPodOverThreshold(
-					ctx,
-					pod.Namespace,
-					pod.Name,
-					threshold,
-					duration,
-				)
-				if err != nil {
-					podLog.Error(err, "Failed to check pod metrics")
-					continue
-				}
-
-				if isOverThreshold {
-					podLog.Info("Pod exceeded threshold, executing remediation actions",
-						"condition_type", condition.Type,
-						"current_value", threshold,
-					)
-
-					// Execute remediation actions
-					if err := r.executeActions(ctx, rule.Actions, &deployment); err != nil {
-						podLog.Error(err, "Failed to execute remediation actions")
-					} else {
-						podLog.Info("Successfully executed remediation actions")
-					}
-				}
+	if isOver {
+		// Process remediation rules
+		for _, rule := range policy.Spec.Rules {
+			if err := r.processRule(ctx, &policy, &pod, rule); err != nil {
+				log.Error(err, "failed to process rule", "rule", rule.Name)
+				continue
 			}
 		}
 	}
 
+	// Update status
+	policy.Status.LastChecked = metav1.Now()
+	policy.Status.Active = isOver
+	if err := r.Status().Update(ctx, &policy); err != nil {
+		log.Error(err, "failed to update policy status")
+		return ctrl.Result{}, err
+	}
+
 	return ctrl.Result{RequeueAfter: time.Second * 30}, nil
+}
+
+func (r *SelfRemediationPolicyReconciler) processRule(ctx context.Context, policy *remediationv1alpha1.SelfRemediationPolicy, pod *corev1.Pod, rule remediationv1alpha1.Rule) error {
+
+	for _, action := range rule.Actions {
+		if action.Type == remediationv1alpha1.ScaleUp {
+			var deployment appsv1.Deployment
+			if err := r.Get(ctx, types.NamespacedName{
+				Namespace: action.Target.Namespace,
+				Name:      action.Target.Name,
+			}, &deployment); err != nil {
+				return fmt.Errorf("failed to get deployment: %w", err)
+			}
+
+			if err := r.executeActions(ctx, []remediationv1alpha1.Action{action}, &deployment); err != nil {
+				return fmt.Errorf("failed to execute actions: %w", err)
+			}
+
+			// Track this remediation
+			r.trackRemediation(types.NamespacedName{
+				Namespace: policy.Namespace,
+				Name:      policy.Name,
+			}, types.NamespacedName{
+				Namespace: deployment.Namespace,
+				Name:      deployment.Name,
+			})
+		}
+	}
+
+	return nil
 }
 
 func (r *SelfRemediationPolicyReconciler) executeActions(
@@ -175,12 +249,24 @@ func (r *SelfRemediationPolicyReconciler) executeActions(
 
 		switch action.Type {
 		case remediationv1alpha1.ScaleUp:
-			if action.ScalingParams == nil || action.ScalingParams.TemporaryMaxReplicas == nil {
-				return fmt.Errorf("scaling parameters required for ScaleUp action")
+			// Skip if scaling parameters are not properly configured
+			if action.ScalingParams == nil {
+				actionLog.Info("Skipping action: scaling parameters not configured")
+				continue
+			}
+			if action.ScalingParams.TemporaryMaxReplicas == nil {
+				actionLog.Info("Skipping action: temporary max replicas not set")
+				continue
 			}
 
 			// Store original replicas for later reversion
 			originalReplicas := deployment.Spec.Replicas
+			if originalReplicas == nil {
+				// Set default if not specified
+				defaultReplicas := int32(1)
+				originalReplicas = &defaultReplicas
+			}
+
 			if deployment.Annotations == nil {
 				deployment.Annotations = make(map[string]string)
 			}

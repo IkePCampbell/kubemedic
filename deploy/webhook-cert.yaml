@@ -1,0 +1,44 @@
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: kubemedic-webhook-cert
+  namespace: kubemedic
+spec:
+  dnsNames:
+  - kubemedic-webhook-service.kubemedic.svc
+  - kubemedic-webhook-service.kubemedic.svc.cluster.local
+  issuerRef:
+    kind: ClusterIssuer
+    name: selfsigned-issuer
+  secretName: kubemedic-webhook-cert
+---
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: selfsigned-issuer
+spec:
+  selfSigned: {}
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingWebhookConfiguration
+metadata:
+  name: kubemedic-validating-webhook
+  annotations:
+    cert-manager.io/inject-ca-from: kubemedic/kubemedic-webhook-cert
+webhooks:
+- name: validate.remediation.kubemedic.io
+  rules:
+  - apiGroups: ["remediation.kubemedic.io"]
+    apiVersions: ["v1alpha1"]
+    operations: ["CREATE", "UPDATE"]
+    resources: ["selfremediationpolicies"]
+    scope: "Namespaced"
+  clientConfig:
+    service:
+      namespace: kubemedic
+      name: kubemedic-webhook-service
+      path: "/validate"
+  admissionReviewVersions: ["v1"]
+  sideEffects: None
+  timeoutSeconds: 5
+  failurePolicy: Fail 
