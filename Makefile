@@ -5,6 +5,11 @@
 # - use environment variables to overwrite this value (e.g export VERSION=0.0.2)
 VERSION ?= 0.0.1
 
+# Build-time metadata (can be overridden by CI)
+GIT_COMMIT ?= $(shell git rev-parse --short HEAD 2>/dev/null)
+BUILD_DATE ?= $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
+LDFLAGS ?= -X github.com/ikepcampbell/kubemedic/internal/version.Version=$(VERSION) -X github.com/ikepcampbell/kubemedic/internal/version.GitCommit=$(GIT_COMMIT) -X github.com/ikepcampbell/kubemedic/internal/version.BuildDate=$(BUILD_DATE)
+
 # CHANNELS define the bundle channels used in the bundle.
 # Add a new line here if you would like to change its default config. (E.g CHANNELS = "candidate,fast,stable")
 # To re-generate a bundle for other specific channels without changing the standard setup, you can:
@@ -132,11 +137,11 @@ lint-fix: golangci-lint ## Run golangci-lint linter and perform fixes
 
 .PHONY: build
 build: manifests generate fmt vet ## Build manager binary.
-	go build -o bin/manager cmd/main.go
+	go build -ldflags "$(LDFLAGS)" -o bin/manager cmd/main.go
 
 .PHONY: run
 run: manifests generate fmt vet ## Run a controller from your host.
-	go run ./cmd/main.go
+	go run -ldflags "$(LDFLAGS)" ./cmd/main.go
 
 # If you wish to build the manager image targeting other platforms you can use the --platform flag.
 # (i.e. docker build --platform linux/arm64). However, you must enable docker buildKit for it.
@@ -352,7 +357,7 @@ monitor: ## Monitor the test deployments
 
 .PHONY: build-webhook
 build-webhook: manifests generate fmt vet ## Build webhook binary.
-	go build -o bin/webhook cmd/webhook/main.go
+	go build -ldflags "$(LDFLAGS)" -o bin/webhook cmd/webhook/main.go
 
 .PHONY: docker-build-webhook
 docker-build-webhook: ## Build docker image with the webhook.
