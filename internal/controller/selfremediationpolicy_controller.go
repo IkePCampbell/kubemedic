@@ -24,6 +24,7 @@ import (
 	"time"
 
 	appsv1 "k8s.io/api/apps/v1"
+	autoscalingv2 "k8s.io/api/autoscaling/v2"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -292,6 +293,60 @@ func (r *SelfRemediationPolicyReconciler) executeActions(
 				duration, _ := time.ParseDuration(action.ScalingParams.ScalingDuration)
 				go r.scheduleReversion(deployment, duration)
 			}
+
+		case remediationv1alpha1.AdjustHPALimits:
+			if action.ScalingParams == nil {
+				actionLog.Info("Skipping action: scaling parameters not configured")
+				continue
+			}
+			if action.ScalingParams.TemporaryMaxReplicas == nil {
+				actionLog.Info("Skipping action: temporary max replicas not set")
+				continue
+			}
+
+			hpa, err := r.resolveHPAForAction(ctx, action, deployment)
+			if err != nil {
+				return err
+			}
+			if hpa == nil {
+				actionLog.Info("Skipping action: no matching HPA found")
+				continue
+			}
+
+			if hpa.Annotations == nil {
+				hpa.Annotations = make(map[string]string)
+			}
+			// Store original maxReplicas for later reversion.
+			hpa.Annotations["kubemedic.io/original-hpa-max-replicas"] = fmt.Sprintf("%d", hpa.Spec.MaxReplicas)
+
+			newMax := *action.ScalingParams.TemporaryMaxReplicas
+			if newMax < 1 {
+				actionLog.Info("Skipping action: temporary max replicas must be >= 1")
+				continue
+			}
+
+			// Ensure maxReplicas is at least minReplicas (when set).
+			if hpa.Spec.MinReplicas != nil && newMax < *hpa.Spec.MinReplicas {
+				newMax = *hpa.Spec.MinReplicas
+			}
+
+			actionLog.Info("Adjusting HPA maxReplicas",
+				"hpa", types.NamespacedName{Namespace: hpa.Namespace, Name: hpa.Name}.String(),
+				"original_max_replicas", hpa.Spec.MaxReplicas,
+				"new_max_replicas", newMax,
+				"scaling_duration", action.ScalingParams.ScalingDuration,
+			)
+
+			hpa.Spec.MaxReplicas = newMax
+			if err := r.Update(ctx, hpa); err != nil {
+				actionLog.Error(err, "Failed to update HPA")
+				return fmt.Errorf("failed to update HPA: %v", err)
+			}
+
+			if action.ScalingParams.ScalingDuration != "" {
+				duration, _ := time.ParseDuration(action.ScalingParams.ScalingDuration)
+				go r.scheduleHPAReversion(hpa.Namespace, hpa.Name, duration)
+			}
 		}
 	}
 	return nil
@@ -315,7 +370,58 @@ func (r *SelfRemediationPolicyReconciler) scheduleReversion(deployment *appsv1.D
 		if original, err := strconv.ParseInt(originalStr, 10, 32); err == nil {
 			originalReplicas := int32(original)
 			currentDeployment.Spec.Replicas = &originalReplicas
-			r.Update(ctx, &currentDeployment)
+			_ = r.Update(ctx, &currentDeployment)
+		}
+	}
+}
+
+func (r *SelfRemediationPolicyReconciler) resolveHPAForAction(
+	ctx context.Context,
+	action remediationv1alpha1.Action,
+	deployment *appsv1.Deployment,
+) (*autoscalingv2.HorizontalPodAutoscaler, error) {
+	// If the action explicitly targets an HPA, use it.
+	if action.Target.Kind == "HorizontalPodAutoscaler" || action.Target.Kind == "HPA" {
+		var hpa autoscalingv2.HorizontalPodAutoscaler
+		if err := r.Get(ctx, types.NamespacedName{Namespace: action.Target.Namespace, Name: action.Target.Name}, &hpa); err != nil {
+			return nil, fmt.Errorf("failed to get HPA: %w", err)
+		}
+		return &hpa, nil
+	}
+
+	// Default: locate the HPA that scales the given Deployment.
+	var hpas autoscalingv2.HorizontalPodAutoscalerList
+	if err := r.List(ctx, &hpas, client.InNamespace(deployment.Namespace)); err != nil {
+		return nil, fmt.Errorf("failed to list HPAs: %w", err)
+	}
+
+	for i := range hpas.Items {
+		h := &hpas.Items[i]
+		if h.Spec.ScaleTargetRef.Kind == "Deployment" && h.Spec.ScaleTargetRef.Name == deployment.Name {
+			return h, nil
+		}
+	}
+
+	return nil, nil
+}
+
+func (r *SelfRemediationPolicyReconciler) scheduleHPAReversion(namespace, name string, duration time.Duration) {
+	time.Sleep(duration)
+
+	ctx := context.Background()
+	var current autoscalingv2.HorizontalPodAutoscaler
+	if err := r.Get(ctx, client.ObjectKey{Namespace: namespace, Name: name}, &current); err != nil {
+		return
+	}
+
+	if current.Annotations == nil {
+		return
+	}
+
+	if originalStr, ok := current.Annotations["kubemedic.io/original-hpa-max-replicas"]; ok {
+		if original, err := strconv.ParseInt(originalStr, 10, 32); err == nil {
+			current.Spec.MaxReplicas = int32(original)
+			_ = r.Update(ctx, &current)
 		}
 	}
 }
