@@ -14,7 +14,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 
-	webhookpkg "kubemedic/pkg/webhook"
+	webhookpkg "github.com/ikepcampbell/kubemedic/pkg/webhook"
 )
 
 func main() {

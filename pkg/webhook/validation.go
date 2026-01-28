@@ -13,7 +13,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 
-	remediationv1alpha1 "kubemedic/api/v1alpha1"
+	remediationv1alpha1 "github.com/ikepcampbell/kubemedic/api/v1alpha1"
 )
 
 // KubeMedicValidator handles validation of SelfRemediationPolicy resources
