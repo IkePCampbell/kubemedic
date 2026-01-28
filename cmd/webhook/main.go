@@ -3,8 +3,10 @@ package main
 import (
 	"context"
 	"flag"
+	"fmt"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 
 	"k8s.io/klog/v2"
@@ -32,11 +34,22 @@ func main() {
 		os.Exit(1)
 	}
 
+	certDir := filepath.Dir(tlsCertFile)
+	certName := filepath.Base(tlsCertFile)
+	keyDir := filepath.Dir(tlsKeyFile)
+	keyName := filepath.Base(tlsKeyFile)
+	if certDir != keyDir {
+		klog.Error(fmt.Errorf("tls cert and key must be in the same directory"), "invalid TLS flags", "tls-cert-file", tlsCertFile, "tls-private-key-file", tlsKeyFile)
+		os.Exit(1)
+	}
+
 	// Create a new manager to provide shared dependencies and start components
 	mgr, err := manager.New(cfg, manager.Options{
 		WebhookServer: webhook.NewServer(webhook.Options{
-			Port:    8443,
-			CertDir: "/etc/webhook/certs",
+			Port:     8443,
+			CertDir:  certDir,
+			CertName: certName,
+			KeyName:  keyName,
 		}),
 		Metrics: metricsserver.Options{
 			BindAddress: "0",
