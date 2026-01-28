@@ -151,6 +151,13 @@ Explore our comprehensive examples:
 
 Each example includes both the policy configuration and a test application to demonstrate the functionality.
 
+## Version
+
+To quickly verify what build you're running:
+```bash
+./manager --version
+```
+
 ## Contributing
 
 We welcome contributions! Please see our [Contributing Guide](CONTRIBUTING.md) for details.
