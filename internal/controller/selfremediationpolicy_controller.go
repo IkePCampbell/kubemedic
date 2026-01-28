@@ -213,9 +213,16 @@ func (r *SelfRemediationPolicyReconciler) processRule(ctx context.Context, polic
 
 	for _, action := range rule.Actions {
 		if action.Type == remediationv1alpha1.ScaleUp {
+			targetNamespace := action.Target.Namespace
+			if targetNamespace == "" {
+				// Default to the policy namespace if action target namespace isn't specified.
+				// This makes policies less verbose and avoids surprising "namespace is empty" lookups.
+				targetNamespace = policy.Namespace
+			}
+
 			var deployment appsv1.Deployment
 			if err := r.Get(ctx, types.NamespacedName{
-				Namespace: action.Target.Namespace,
+				Namespace: targetNamespace,
 				Name:      action.Target.Name,
 			}, &deployment); err != nil {
 				return fmt.Errorf("failed to get deployment: %w", err)
@@ -410,8 +417,12 @@ func (r *SelfRemediationPolicyReconciler) resolveHPAForAction(
 ) (*autoscalingv2.HorizontalPodAutoscaler, error) {
 	// If the action explicitly targets an HPA, use it.
 	if action.Target.Kind == "HorizontalPodAutoscaler" || action.Target.Kind == "HPA" {
+		targetNamespace := action.Target.Namespace
+		if targetNamespace == "" {
+			targetNamespace = deployment.Namespace
+		}
 		var hpa autoscalingv2.HorizontalPodAutoscaler
-		if err := r.Get(ctx, types.NamespacedName{Namespace: action.Target.Namespace, Name: action.Target.Name}, &hpa); err != nil {
+		if err := r.Get(ctx, types.NamespacedName{Namespace: targetNamespace, Name: action.Target.Name}, &hpa); err != nil {
 			return nil, fmt.Errorf("failed to get HPA: %w", err)
 		}
 		return &hpa, nil
