@@ -30,6 +30,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/metrics/pkg/client/clientset/versioned"
+	"k8s.io/client-go/tools/record"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
@@ -44,6 +45,7 @@ type SelfRemediationPolicyReconciler struct {
 	client.Client
 	Scheme         *runtime.Scheme
 	MetricsWatcher *MetricsWatcher
+	Recorder       record.EventRecorder
 	// Track active remediations
 	activeRemediations sync.Map
 }
@@ -59,6 +61,7 @@ func NewSelfRemediationPolicyReconciler(
 	client client.Client,
 	scheme *runtime.Scheme,
 	metricsClient versioned.Interface,
+	recorder record.EventRecorder,
 ) *SelfRemediationPolicyReconciler {
 	if client == nil {
 		panic("client cannot be nil")
@@ -68,6 +71,9 @@ func NewSelfRemediationPolicyReconciler(
 	}
 	if metricsClient == nil {
 		panic("metricsClient cannot be nil")
+	}
+	if recorder == nil {
+		panic("recorder cannot be nil")
 	}
 
 	metricsWatcher := NewMetricsWatcher(metricsClient)
@@ -79,6 +85,7 @@ func NewSelfRemediationPolicyReconciler(
 		Client:         client,
 		Scheme:         scheme,
 		MetricsWatcher: metricsWatcher,
+		Recorder:       recorder,
 	}
 }
 
@@ -214,7 +221,7 @@ func (r *SelfRemediationPolicyReconciler) processRule(ctx context.Context, polic
 				return fmt.Errorf("failed to get deployment: %w", err)
 			}
 
-			if err := r.executeActions(ctx, []remediationv1alpha1.Action{action}, &deployment); err != nil {
+			if err := r.executeActions(ctx, policy, []remediationv1alpha1.Action{action}, &deployment); err != nil {
 				return fmt.Errorf("failed to execute actions: %w", err)
 			}
 
@@ -234,6 +241,7 @@ func (r *SelfRemediationPolicyReconciler) processRule(ctx context.Context, polic
 
 func (r *SelfRemediationPolicyReconciler) executeActions(
 	ctx context.Context,
+	policy *remediationv1alpha1.SelfRemediationPolicy,
 	actions []remediationv1alpha1.Action,
 	deployment *appsv1.Deployment,
 ) error {
@@ -272,6 +280,26 @@ func (r *SelfRemediationPolicyReconciler) executeActions(
 				deployment.Annotations = make(map[string]string)
 			}
 			deployment.Annotations["kubemedic.io/original-replicas"] = fmt.Sprintf("%d", *originalReplicas)
+
+			// If this Deployment is controlled by an HPA, don't fight it.
+			// If the requested replicas exceed HPA maxReplicas, the HPA controller will clamp it back down.
+			hpa, err := r.resolveHPAForAction(ctx, action, deployment)
+			if err != nil {
+				return err
+			}
+			if hpa != nil && *action.ScalingParams.TemporaryMaxReplicas > hpa.Spec.MaxReplicas {
+				msg := fmt.Sprintf("ScaleUp requested replicas=%d but HPA %s/%s maxReplicas=%d; skipping ScaleUp (use AdjustHPALimits instead)",
+					*action.ScalingParams.TemporaryMaxReplicas,
+					hpa.Namespace,
+					hpa.Name,
+					hpa.Spec.MaxReplicas,
+				)
+				actionLog.Info(msg)
+				if r.Recorder != nil && policy != nil {
+					r.Recorder.Eventf(policy, corev1.EventTypeWarning, "HPAMaxed", "%s", msg)
+				}
+				continue
+			}
 
 			// Scale up
 			newReplicas := *action.ScalingParams.TemporaryMaxReplicas
