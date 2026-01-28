@@ -19,6 +19,7 @@ package main
 import (
 	"crypto/tls"
 	"flag"
+	"fmt"
 	"os"
 
 	// Import all Kubernetes client auth plugins (e.g. Azure, GCP, OIDC, etc.)
@@ -38,17 +39,13 @@ import (
 
 	remediationv1alpha1 "github.com/ikepcampbell/kubemedic/api/v1alpha1"
 	"github.com/ikepcampbell/kubemedic/internal/controller"
+	"github.com/ikepcampbell/kubemedic/internal/version"
 	// +kubebuilder:scaffold:imports
 )
 
 var (
 	scheme   = runtime.NewScheme()
 	setupLog = ctrl.Log.WithName("setup")
-
-	// Version information. These are intended to be set at build time via -ldflags.
-	Version = "dev"
-	Commit  = "none"
-	Date    = "unknown"
 )
 
 func init() {
@@ -64,7 +61,7 @@ func main() {
 	var probeAddr string
 	var secureMetrics bool
 	var enableHTTP2 bool
-	var showVersion bool
+	var printVersion bool
 	var tlsOpts []func(*tls.Config)
 	flag.StringVar(&metricsAddr, "metrics-bind-address", "0", "The address the metrics endpoint binds to. "+
 		"Use :8443 for HTTPS or :8080 for HTTP, or leave as 0 to disable the metrics service.")
@@ -76,20 +73,21 @@ func main() {
 		"If set, the metrics endpoint is served securely via HTTPS. Use --metrics-secure=false to use HTTP instead.")
 	flag.BoolVar(&enableHTTP2, "enable-http2", false,
 		"If set, HTTP/2 will be enabled for the metrics and webhook servers")
-	flag.BoolVar(&showVersion, "version", false, "Print version information and exit")
+	flag.BoolVar(&printVersion, "version", false, "Print version information and exit")
 	opts := zap.Options{
 		Development: true,
 	}
 	opts.BindFlags(flag.CommandLine)
 	flag.Parse()
 
-	if showVersion {
-		// Keep this intentionally stdout-friendly for scripts.
-		_, _ = os.Stdout.WriteString("kubemedic " + Version + " (" + Commit + ") " + Date + "\n")
+	if printVersion {
+		fmt.Println(version.String())
 		os.Exit(0)
 	}
 
 	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&opts)))
+
+	setupLog.Info("starting kubemedic", "version", version.String())
 
 	// if the enable-http2 flag is false (the default), http/2 should be disabled
 	// due to its vulnerabilities. More specifically, disabling http/2 will
@@ -184,7 +182,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	setupLog.Info("starting manager")
+	setupLog.Info("starting manager", "version", version.String())
 	if err := mgr.Start(ctrl.SetupSignalHandler()); err != nil {
 		setupLog.Error(err, "problem running manager")
 		os.Exit(1)

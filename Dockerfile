@@ -15,6 +15,7 @@ RUN go mod download
 COPY cmd/main.go cmd/main.go
 COPY api/ api/
 COPY internal/controller/ internal/controller/
+COPY internal/version/ internal/version/
 
 # Build
 # the GOARCH has not a default value to allow the binary be built according to the host where the command
@@ -25,7 +26,7 @@ ARG VERSION=dev
 ARG COMMIT=none
 ARG DATE=unknown
 RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} \
-    go build -a -ldflags "-X main.Version=${VERSION} -X main.Commit=${COMMIT} -X main.Date=${DATE}" \
+    go build -a -ldflags "-X github.com/ikepcampbell/kubemedic/internal/version.Version=${VERSION} -X github.com/ikepcampbell/kubemedic/internal/version.GitCommit=${COMMIT} -X github.com/ikepcampbell/kubemedic/internal/version.BuildDate=${DATE}" \
     -o manager cmd/main.go
 
 # Use distroless as minimal base image to package the manager binary
