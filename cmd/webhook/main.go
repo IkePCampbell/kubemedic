@@ -16,16 +16,33 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 
+	"github.com/ikepcampbell/kubemedic/internal/version"
 	webhookpkg "github.com/ikepcampbell/kubemedic/pkg/webhook"
 )
 
 func main() {
 	var tlsCertFile string
 	var tlsKeyFile string
+	var printVersion bool
 
 	flag.StringVar(&tlsCertFile, "tls-cert-file", "/etc/webhook/certs/tls.crt", "File containing the x509 Certificate for HTTPS")
 	flag.StringVar(&tlsKeyFile, "tls-private-key-file", "/etc/webhook/certs/tls.key", "File containing the x509 private key")
+	flag.BoolVar(&printVersion, "version", false, "Print version information and exit")
 	flag.Parse()
+
+	if printVersion {
+		fmt.Println(version.String())
+		os.Exit(0)
+	}
+
+	certDir := filepath.Dir(tlsCertFile)
+	keyDir := filepath.Dir(tlsKeyFile)
+	if certDir != keyDir {
+		klog.ErrorS(nil, "tls-cert-file and tls-private-key-file must be in the same directory", "tls-cert-file", tlsCertFile, "tls-private-key-file", tlsKeyFile)
+		os.Exit(1)
+	}
+	certName := filepath.Base(tlsCertFile)
+	keyName := filepath.Base(tlsKeyFile)
 
 	// Get a config to talk to the apiserver
 	cfg, err := config.GetConfig()
@@ -74,7 +91,7 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
 	defer stop()
 
-	klog.Info("starting webhook server")
+	klog.InfoS("starting webhook server", "version", version.String())
 	if err := mgr.Start(ctx); err != nil {
 		klog.Error(err, "error starting webhook server")
 		os.Exit(1)
