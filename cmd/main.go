@@ -36,8 +36,8 @@ import (
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
 
-	remediationv1alpha1 "kubemedic/api/v1alpha1"
-	"kubemedic/internal/controller"
+	remediationv1alpha1 "github.com/ikepcampbell/kubemedic/api/v1alpha1"
+	"github.com/ikepcampbell/kubemedic/internal/controller"
 	// +kubebuilder:scaffold:imports
 )
 

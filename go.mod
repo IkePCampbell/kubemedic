@@ -1,9 +1,8 @@
-module kubemedic
+module github.com/ikepcampbell/kubemedic
 
 go 1.22.1
 
 require (
-	github.com/ikepcampbell/kubemedic v0.0.0-20250205055232-86ee7c6cba59
 	github.com/onsi/ginkgo/v2 v2.19.0
 	github.com/onsi/gomega v1.33.1
 	k8s.io/api v0.31.0

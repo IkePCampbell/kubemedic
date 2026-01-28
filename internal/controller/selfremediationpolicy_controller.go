@@ -33,7 +33,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
-	remediationv1alpha1 "kubemedic/api/v1alpha1"
+	remediationv1alpha1 "github.com/ikepcampbell/kubemedic/api/v1alpha1"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
