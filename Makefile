@@ -135,6 +135,9 @@ lint-fix: golangci-lint ## Run golangci-lint linter and perform fixes
 
 ##@ Build
 
+# Build metadata for `--version` (override as needed).
+# See the top-of-file LDFLAGS for internal/version variables.
+
 .PHONY: build
 build: manifests generate fmt vet ## Build manager binary.
 	go build -ldflags "$(LDFLAGS)" -o bin/manager cmd/main.go
@@ -148,7 +151,11 @@ run: manifests generate fmt vet ## Run a controller from your host.
 # More info: https://docs.docker.com/develop/develop-images/build_enhancements/
 .PHONY: docker-build
 docker-build: ## Build docker image with the manager.
-	$(CONTAINER_TOOL) build -t ${IMG} .
+	$(CONTAINER_TOOL) build \
+		--build-arg VERSION=$(VERSION) \
+		--build-arg COMMIT=$(GIT_COMMIT) \
+		--build-arg DATE=$(BUILD_DATE) \
+		-t ${IMG} .
 
 .PHONY: docker-push
 docker-push: ## Push docker image with the manager.
